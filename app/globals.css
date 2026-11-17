@@ -1,0 +1,537 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@300;400;500;700&display=swap");
+
+/* Base page styles */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html,
+body {
+    height: 100%;
+    overflow: hidden;
+}
+
+button {
+    border: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+/* App container: holds the theme colours (day is the default) */
+.app {
+    --bg: #ebe7e0;
+    --ink: #1c1d20;
+    --mute: #8d887f;
+    --line: #c9c3b8;
+    --soft: rgba(235, 231, 224, 0.72);
+    --accent: #ff5b2e;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --sans: "Space Grotesk", system-ui, sans-serif;
+
+    position: fixed;
+    inset: 0;
+    background-color: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    transition: background-color 0.6s, color 0.6s;
+}
+
+/* Night theme overrides */
+.app.night {
+    --bg: #12151b;
+    --ink: #ecebe6;
+    --mute: #7c818b;
+    --line: #2d323b;
+    --soft: rgba(18, 21, 27, 0.7);
+}
+
+/* Small uppercase label text used across the UI */
+.micro {
+    color: var(--mute);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+/* 3D canvas and the labels drawn on top of it */
+.scene {
+    position: fixed;
+    inset: 0;
+}
+
+.scene canvas {
+    display: block;
+}
+
+.scene-labels {
+    position: fixed;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+}
+
+.rack-label {
+    position: absolute;
+    padding-right: 12px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    text-align: right;
+    white-space: nowrap;
+    transform: translate(-100%, -50%);
+    transition: opacity 0.5s;
+}
+
+.rack-label .count {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.rack-label .name {
+    color: var(--mute);
+    letter-spacing: 0.08em;
+}
+
+.rack-label .rank {
+    color: var(--accent);
+}
+
+.rack-label.active .name,
+.rack-label.active .count {
+    color: var(--accent);
+}
+
+/* Fades the scene behind the info panel so the text stays readable */
+.veil {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 44vw;
+    z-index: 4;
+    background: linear-gradient(90deg, transparent, var(--bg) 42%);
+    opacity: 0.82;
+    pointer-events: none;
+}
+
+/* Top-left title */
+.brand {
+    position: fixed;
+    top: 34px;
+    left: 40px;
+    z-index: 5;
+}
+
+.brand-title {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+.brand-title span {
+    color: var(--accent);
+}
+
+.brand .micro {
+    margin-top: 8px;
+}
+
+/* Top-right bar: data source, theme switch, play button */
+.top-bar {
+    position: fixed;
+    top: 38px;
+    right: 40px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+}
+
+.theme-toggle {
+    display: flex;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+}
+
+.theme-toggle button {
+    padding: 5px 11px;
+    border-radius: 16px;
+    color: var(--mute);
+    transition: all 0.3s;
+}
+
+.theme-toggle button::before {
+    content: "●";
+    margin-right: 5px;
+    color: var(--accent);
+    font-size: 7px;
+    vertical-align: 1px;
+}
+
+.theme-toggle button.active {
+    background-color: var(--ink);
+    color: var(--bg);
+}
+
+.divider {
+    width: 1px;
+    height: 18px;
+    background-color: var(--line);
+}
+
+.icon-button {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+}
+
+.icon-button:hover {
+    color: var(--accent);
+}
+
+/* Right column: stage information or drill-down result */
+.info-panel {
+    position: fixed;
+    top: 50%;
+    right: 40px;
+    z-index: 5;
+    width: min(420px, 34vw);
+    transform: translateY(-46%);
+}
+
+.fade-in {
+    animation: fade-in 0.5s;
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+.info-panel .micro {
+    margin-bottom: 14px;
+}
+
+.info-panel .micro b {
+    color: var(--ink);
+    font-weight: 500;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    border-bottom: 1.5px solid var(--ink);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+}
+
+.info-row span:last-child {
+    color: var(--mute);
+}
+
+.info-title {
+    margin-top: 18px;
+    font-size: 46px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+}
+
+.info-title span {
+    color: var(--accent);
+}
+
+.info-sub {
+    margin-top: 8px;
+    font-size: 17px;
+    font-weight: 500;
+}
+
+.info-meta {
+    margin-top: 14px;
+    color: var(--mute);
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.04em;
+}
+
+.info-text {
+    min-height: 4.6em;
+    margin-top: 14px;
+    color: var(--mute);
+    font-size: 13.5px;
+    line-height: 1.55;
+}
+
+/* Pipeline code with the current stage highlighted */
+.code-block {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1.75;
+    overflow-x: auto;
+}
+
+.code-line {
+    display: block;
+    margin-left: -10px;
+    padding-left: 10px;
+    color: var(--line);
+    white-space: pre;
+    transition: color 0.4s, box-shadow 0.4s;
+}
+
+.app.night .code-line {
+    color: #4a505b;
+}
+
+.code-line.past,
+.app.night .code-line.past {
+    color: var(--mute);
+}
+
+.code-line.current,
+.app.night .code-line.current {
+    color: var(--ink);
+    box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* Drill-down list of top movies */
+.movie-list {
+    max-height: 210px;
+    margin-top: 12px;
+    list-style: none;
+    overflow-y: auto;
+}
+
+.movie-list li {
+    display: grid;
+    grid-template-columns: 26px 1fr auto;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 11px;
+    opacity: 0;
+    animation: rise 0.45s forwards;
+}
+
+.movie-list .index,
+.movie-list .year {
+    color: var(--mute);
+}
+
+.movie-list .rating {
+    color: var(--accent);
+}
+
+.movie-list .loading {
+    color: var(--mute);
+}
+
+@keyframes rise {
+    from {
+        opacity: 0;
+        transform: translateY(5px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+/* Button at the bottom of the info panel */
+.panel-action {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    margin-top: 16px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+    font-size: 14px;
+    font-weight: 500;
+    text-align: left;
+}
+
+.panel-action .arrow {
+    font-size: 20px;
+    transition: transform 0.3s;
+}
+
+.panel-action:hover .arrow {
+    color: var(--accent);
+    transform: translate(3px, -3px);
+}
+
+/* Bottom-left stage number */
+.stage-counter {
+    position: fixed;
+    left: 40px;
+    bottom: 58px;
+    z-index: 5;
+}
+
+.stage-number {
+    margin-top: 8px;
+    font-size: 76px;
+    font-weight: 300;
+    letter-spacing: -0.04em;
+    line-height: 0.9;
+}
+
+.stage-number small {
+    margin-left: 6px;
+    color: var(--mute);
+    font-family: var(--mono);
+    font-size: 15px;
+    letter-spacing: 0;
+}
+
+/* Bottom-center stage switcher */
+.scrubber {
+    position: fixed;
+    left: 50%;
+    bottom: 74px;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 22px;
+    transform: translateX(-50%);
+}
+
+.scrubber-arrow {
+    width: 30px;
+    height: 30px;
+    font-size: 22px;
+}
+
+.scrubber-arrow:hover {
+    color: var(--accent);
+}
+
+.ticks {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.tick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.tick i {
+    display: block;
+    width: 1.5px;
+    height: 12px;
+    background-color: var(--line);
+    transition: all 0.35s;
+}
+
+.tick span {
+    height: 12px;
+    color: var(--mute);
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.04em;
+    transition: color 0.3s;
+}
+
+.tick.done i {
+    background-color: var(--mute);
+}
+
+.tick.active i {
+    width: 2px;
+    height: 24px;
+    background-color: var(--ink);
+}
+
+.tick.active span {
+    color: var(--accent);
+}
+
+/* Footer line */
+.footer {
+    position: fixed;
+    left: 40px;
+    right: 40px;
+    bottom: 20px;
+    z-index: 5;
+    display: flex;
+    justify-content: space-between;
+    pointer-events: none;
+}
+
+/* Responsive layout for smaller screens */
+@media (max-width: 900px) {
+    .brand {
+        top: 20px;
+        left: 20px;
+    }
+
+    .brand-title {
+        font-size: 32px;
+    }
+
+    .top-bar {
+        top: 24px;
+        right: 20px;
+    }
+
+    .top-bar .micro {
+        display: none;
+    }
+
+    .info-panel {
+        top: auto;
+        right: 20px;
+        bottom: 150px;
+        width: calc(100vw - 40px);
+        padding: 12px;
+        background-color: var(--soft);
+        backdrop-filter: blur(8px);
+        transform: none;
+    }
+
+    .info-title {
+        font-size: 30px;
+    }
+
+    .info-text,
+    .code-block {
+        display: none;
+    }
+
+    .stage-counter,
+    .footer {
+        display: none;
+    }
+
+    .scrubber {
+        bottom: 36px;
+    }
+}
