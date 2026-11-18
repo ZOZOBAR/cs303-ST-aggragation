@@ -6,8 +6,9 @@ import InfoPanel from "@/components/InfoPanel";
 import { StageCounter, StageScrubber } from "@/components/StageControls";
 import { Brand, TopBar } from "@/components/TopBar";
 import getTopMovies from "@/lib/getTopMovies";
+import getMovie from "@/lib/getMovie";
 import { STAGES } from "@/lib/pipeline";
-import { ArchiveData, Theme, TopMovie } from "@/lib/types";
+import { ArchiveData, MovieDetail, Theme, TopMovie } from "@/lib/types";
 
 const LAST_STAGE = STAGES.length - 1;
 const PLAY_DELAY = 2800;
@@ -24,9 +25,15 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     const [playing, setPlaying] = useState(false);
     const [topMovies, setTopMovies] = useState<TopMovie[]>([]);
     const [loading, setLoading] = useState(false);
+    const [selectedCardIndex, setSelectedCardIndex] = useState(-1);
+    const [movie, setMovie] = useState<MovieDetail | null>(null);
+    const [movieLoading, setMovieLoading] = useState(false);
 
     // Racks can only be selected after $group, so the selection is ignored before that
     const selected = stage >= 3 ? selectedGenre : -1;
+
+    // A single card can only be open inside the open rack
+    const selectedCard = selected >= 0 && data.cards[selectedCardIndex]?.genre === selected ? selectedCardIndex : -1;
 
     // Rank of the selected rack (alphabetical before $sort, by count after)
     const order = data.genres.map((_, g) => g);
@@ -45,6 +52,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     // Clicking a rack runs the drill-down Server Action for that genre
     function selectGenre(genre: number) {
         setSelectedGenre(genre);
+        setSelectedCardIndex(-1);
         setPlaying(false);
 
         if (genre < 0) {
@@ -56,6 +64,22 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             .then((movies) => setTopMovies(movies))
             .catch(() => setTopMovies([]))
             .finally(() => setLoading(false));
+    }
+
+    // Clicking a single card runs the getMovie Server Action (findOne by _id)
+    function selectCard(index: number) {
+        setSelectedCardIndex(index);
+
+        if (index < 0) {
+            return;
+        }
+
+        const card = data.cards[index];
+        setMovieLoading(true);
+        getMovie(card.id, data.genres[card.genre])
+            .then((detail) => setMovie(detail))
+            .catch(() => setMovie(null))
+            .finally(() => setMovieLoading(false));
     }
 
     function togglePlay() {
@@ -90,7 +114,12 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         return () => clearInterval(timer);
     }, [playing]);
 
-    // Keyboard: ← → to change stage, Esc to close the drill-down
+    const cardOpenRef = useRef(false);
+    useEffect(() => {
+        cardOpenRef.current = selectedCard >= 0;
+    }, [selectedCard]);
+
+    // Keyboard: ← → to change stage, Esc to close the open card / rack
     useEffect(() => {
         function handleKey(event: KeyboardEvent) {
             if (event.key === "ArrowRight") {
@@ -102,7 +131,12 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
                 setStage((prev) => clampStage(prev - 1));
             }
             if (event.key === "Escape") {
-                setSelectedGenre(-1);
+                // Close the open card first, then the open rack
+                if (cardOpenRef.current) {
+                    setSelectedCardIndex(-1);
+                } else {
+                    setSelectedGenre(-1);
+                }
             }
         }
         window.addEventListener("keydown", handleKey);
@@ -113,7 +147,15 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
 
     return (
         <main className={theme === "night" ? "app night" : "app"}>
-            <ArchiveScene data={data} stage={stage} selected={selected} theme={theme} onSelect={selectGenre} />
+            <ArchiveScene
+                data={data}
+                stage={stage}
+                selected={selected}
+                selectedCard={selectedCard}
+                theme={theme}
+                onSelect={selectGenre}
+                onSelectCard={selectCard}
+            />
             <div className="veil" />
 
             <Brand />
@@ -126,8 +168,12 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
                 rank={rank}
                 topMovies={topMovies}
                 loading={loading}
+                selectedCard={selectedCard}
+                movie={movie}
+                movieLoading={movieLoading}
                 onNext={() => changeStage(stage === LAST_STAGE ? 0 : stage + 1)}
                 onBack={() => setSelectedGenre(-1)}
+                onCloseCard={() => setSelectedCardIndex(-1)}
             />
 
             <StageCounter stage={stage} />
@@ -135,7 +181,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
 
             <footer className="footer">
                 <div className="micro">{data.cards.length} cards · random $sample of the collection</div>
-                <div className="micro">← → step / drag orbit / click a rack</div>
+                <div className="micro">← → step / drag orbit / click a rack, then a card</div>
                 <div className="micro">{data.source === "mongodb" ? "MongoDB Atlas" : "No MONGO_URI · demo data"}</div>
             </footer>
         </main>

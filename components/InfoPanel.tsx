@@ -1,5 +1,5 @@
 import CodeBlock from "@/components/CodeBlock";
-import { ArchiveData, TopMovie } from "@/lib/types";
+import { ArchiveData, MovieDetail, TopMovie } from "@/lib/types";
 import { PIPELINE_CODE, STAGES, drillDownCode } from "@/lib/pipeline";
 
 type InfoPanelProps = {
@@ -9,12 +9,80 @@ type InfoPanelProps = {
     rank: number;
     topMovies: TopMovie[];
     loading: boolean;
+    selectedCard: number;
+    movie: MovieDetail | null;
+    movieLoading: boolean;
     onNext: () => void;
     onBack: () => void;
+    onCloseCard: () => void;
 };
 
 // Right column: explains the current stage, or shows the result of the drill-down query
-export default function InfoPanel({ data, stage, selected, rank, topMovies, loading, onNext, onBack }: InfoPanelProps) {
+export default function InfoPanel(props: InfoPanelProps) {
+    const { data, stage, selected, rank, topMovies, loading, selectedCard, movie, movieLoading, onNext, onBack, onCloseCard } = props;
+
+    // Document view: a single card was clicked
+    if (selected >= 0 && selectedCard >= 0) {
+        const genre = data.genres[selected];
+        const id = data.cards[selectedCard].id;
+
+        return (
+            <section className="info-panel">
+                <div className="fade-in" key={`card-${selectedCard}`}>
+                    <div className="micro">Pipeline / <b>{genre}</b> / document</div>
+                    <div className="info-row">
+                        <span>DOCUMENT</span>
+                        <span>_id</span>
+                    </div>
+
+                    {movieLoading && <p className="info-meta">Running findOne…</p>}
+                    {!movieLoading && !movie && <p className="info-meta">Document not found.</p>}
+                    {!movieLoading && movie && (
+                        <>
+                            <h2 className="info-title movie-title">{movie.title}</h2>
+                            <p className="info-sub">
+                                {movie.year}
+                                {movie.runtime ? ` · ${movie.runtime} min` : ""}
+                                {movie.rating !== null ? ` · ★ ${movie.rating}` : ""}
+                            </p>
+                            {movie.plot && <p className="info-text">{movie.plot}</p>}
+
+                            <dl className="detail-list">
+                                <dt>genres</dt>
+                                <dd>{movie.genres.join(", ")}</dd>
+                                {movie.directors.length > 0 && (
+                                    <>
+                                        <dt>directors</dt>
+                                        <dd>{movie.directors.join(", ")}</dd>
+                                    </>
+                                )}
+                                {movie.cast.length > 0 && (
+                                    <>
+                                        <dt>cast</dt>
+                                        <dd>{movie.cast.join(", ")}</dd>
+                                    </>
+                                )}
+                                {movie.votes !== null && (
+                                    <>
+                                        <dt>imdb.votes</dt>
+                                        <dd>{movie.votes.toLocaleString("en-US")}</dd>
+                                    </>
+                                )}
+                            </dl>
+                        </>
+                    )}
+
+                    <CodeBlock lines={[`db.movies.findOne({`, `  _id: ObjectId("${id}")`, `})`]} past={[0, 1, 2]} />
+
+                    <button className="panel-action" onClick={onCloseCard}>
+                        <span>Back to {genre}</span>
+                        <span className="arrow">↙</span>
+                    </button>
+                </div>
+            </section>
+        );
+    }
+
     // Drill-down view: a rack was clicked
     if (selected >= 0) {
         const genre = data.genres[selected];
@@ -29,7 +97,7 @@ export default function InfoPanel({ data, stage, selected, rank, topMovies, load
                     </div>
                     <h2 className="info-title">{genre}</h2>
                     <p className="info-sub">{data.counts[selected].toLocaleString("en-US")} documents</p>
-                    <p className="info-meta">rank #{rank + 1} · top rated · sorted by imdb.rating</p>
+                    <p className="info-meta">rank #{rank + 1} · top rated · click a card to open it</p>
 
                     <CodeBlock lines={drillDownCode(genre)} past={[0, 1, 2, 3, 4, 5, 6]} />
 

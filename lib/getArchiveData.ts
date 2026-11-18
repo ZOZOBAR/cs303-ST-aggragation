@@ -30,15 +30,17 @@ export default async function getArchiveData(): Promise<ArchiveData> {
 
         // 2. A random sample of documents to draw as cards.
         //    $unwind first, so each card is one (movie, genre) pair like after the real $unwind.
-        const sample = await movies.aggregate<{ genres: string; year: number }>([
+        const sample = await movies.aggregate<{ _id: unknown; genres: string; year: number }>([
             { $match: { year: { $type: "number" }, genres: { $in: genres } } },
             { $unwind: "$genres" },
             { $match: { genres: { $in: genres } } },
             { $sample: { size: CARD_COUNT } },
-            { $project: { _id: 0, genres: 1, year: 1 } },
+            { $project: { genres: 1, year: 1 } },
         ]).toArray();
 
+        // Keep the _id (as a string) so a single card can be opened later
         const cards = sample.map((doc) => ({
+            id: String(doc._id),
             genre: genres.indexOf(doc.genres),
             pass: doc.year >= YEAR_FROM,
         }));

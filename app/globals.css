@@ -360,6 +360,28 @@ button {
     }
 }
 
+/* Single document view */
+.movie-title {
+    font-size: 36px;
+}
+
+.detail-list {
+    display: grid;
+    grid-template-columns: 92px 1fr;
+    gap: 6px 12px;
+    margin-top: 14px;
+    font-family: var(--mono);
+    font-size: 11px;
+}
+
+.detail-list dt {
+    color: var(--mute);
+}
+
+.detail-list dd {
+    color: var(--ink);
+}
+
 /* Button at the bottom of the info panel */
 .panel-action {
     display: flex;

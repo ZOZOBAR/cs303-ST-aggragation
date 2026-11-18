@@ -1,4 +1,4 @@
-import { ArchiveData, TopMovie } from "@/lib/types";
+import { ArchiveData, MovieDetail, TopMovie } from "@/lib/types";
 import { CARD_COUNT, TOP_MOVIES, YEAR_FROM } from "@/lib/pipeline";
 
 // Demo data so the page still works without a database (e.g. before MONGO_URI is set).
@@ -31,7 +31,8 @@ function pickGenre(random: () => number): number {
 export function makeDemoArchive(): ArchiveData {
     const random = makeRandom(11);
 
-    const cards = Array.from({ length: CARD_COUNT }, () => ({
+    const cards = Array.from({ length: CARD_COUNT }, (_, i) => ({
+        id: `demo-${i}`,
         genre: pickGenre(random),
         pass: 1976 + Math.floor(random() * 48) >= YEAR_FROM,
     }));
@@ -59,4 +60,23 @@ export function makeDemoTopMovies(genre: string): TopMovie[] {
         year: YEAR_FROM + Math.floor(random() * 16),
         rating: Math.round((9 - i * 0.2 - random() * 0.1) * 10) / 10,
     }));
+}
+
+// Fake details for one card in demo mode (id looks like "demo-123")
+export function makeDemoMovie(id: string, genre: string): MovieDetail {
+    const index = Number(id.replace("demo-", "")) || 0;
+    const random = makeRandom(index + 7);
+
+    return {
+        id,
+        title: `Demo movie ${String(index).padStart(3, "0")}`,
+        year: YEAR_FROM + Math.floor(random() * 16),
+        genres: [genre],
+        rating: Math.round((5 + random() * 4) * 10) / 10,
+        votes: Math.floor(10000 + random() * 200000),
+        runtime: 85 + Math.floor(random() * 60),
+        directors: ["Demo Director"],
+        cast: ["Actor A", "Actor B", "Actor C"],
+        plot: "Demo data. Connect MONGO_URI to see the real document from sample_mflix.",
+    };
 }

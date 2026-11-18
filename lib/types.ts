@@ -1,5 +1,6 @@
 // One card in the 3D archive = one document after $unwind (one movie + one genre)
 export type ArchiveCard = {
+    id: string;      // the movie's _id, used to look up its details
     genre: number;   // index into ArchiveData.genres
     pass: boolean;   // true if the movie passes the $match stage
 };
@@ -20,6 +21,20 @@ export type TopMovie = {
     title: string;
     year: number;
     rating: number;
+};
+
+// Details of one movie, shown when a single card is clicked
+export type MovieDetail = {
+    id: string;
+    title: string;
+    year: number;
+    genres: string[];
+    rating: number | null;
+    votes: number | null;
+    runtime: number | null;
+    directors: string[];
+    cast: string[];
+    plot: string;
 };
 
 export type Theme = "day" | "night";

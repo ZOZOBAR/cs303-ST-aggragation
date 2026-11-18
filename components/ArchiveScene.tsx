@@ -15,8 +15,10 @@ type ArchiveSceneProps = {
     data: ArchiveData;
     stage: number;
     selected: number;
+    selectedCard: number;
     theme: Theme;
     onSelect: (genre: number) => void;
+    onSelectCard: (card: number) => void;
 };
 
 // One colour per genre (muted palette)
@@ -37,8 +39,11 @@ const CARD_D = 0.56;
 const RACK_X0 = -3.2;
 const RACK_Z0 = -3.4;
 const RACK_GAP = 0.82;
-const PULL_Z = 0.45;
-const PULL_Y = 0.55;
+const PULL_Z = 0.45;      // how far a clicked rack comes forward
+const PULL_Y = 0.55;      // how high a clicked rack rises
+const HOVER_Y = 0.14;     // how high a rack rises under the mouse
+const CARD_POP_Z = 0.55;  // how far a clicked card slides out of its rack
+const CARD_POP_Y = 0.16;
 
 // Seeded random numbers, so the layout is the same on every visit
 function makeRandom(seed: number) {
@@ -51,16 +56,16 @@ function makeRandom(seed: number) {
 
 // The 3D archive. It is a client component because three.js needs the browser (canvas, WebGL).
 // React gives it the current stage / selection / theme; the animation loop reads them every frame.
-export default function ArchiveScene({ data, stage, selected, theme, onSelect }: ArchiveSceneProps) {
+export default function ArchiveScene({ data, stage, selected, selectedCard, theme, onSelect, onSelectCard }: ArchiveSceneProps) {
     const hostRef = useRef<HTMLDivElement>(null);
     const labelsRef = useRef<HTMLDivElement>(null);
 
     // Latest props for the animation loop (the loop is created once and must not restart on every render)
-    const liveRef = useRef({ stage, selected, theme, onSelect });
+    const liveRef = useRef({ stage, selected, selectedCard, theme, onSelect, onSelectCard });
 
     useEffect(() => {
-        liveRef.current = { stage, selected, theme, onSelect };
-    }, [stage, selected, theme, onSelect]);
+        liveRef.current = { stage, selected, selectedCard, theme, onSelect, onSelectCard };
+    }, [stage, selected, selectedCard, theme, onSelect, onSelectCard]);
 
     useEffect(() => {
         const host = hostRef.current;
@@ -162,9 +167,12 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
         });
         const pitch = Math.min(0.072, 7.5 / Math.max(1, ...rackSize));
 
-        // Current and target state of every card (we move "current" a bit towards "target" each frame)
-        const current = cards.map((_, i) => ({ ...floorSpot[i], y: 0, color: new THREE.Color(colors.card) }));
-        const target = cards.map(() => ({ x: 0, y: 0, z: 0, ry: 0, sy: 1, color: new THREE.Color() }));
+        // Current and target state of every card (we move "current" a bit towards "target" each frame).
+        // x / y / z is the card's own position. Once a card is filed into a rack, "attach" becomes 1
+        // and the rack's movement (pull out, hover lift) is added on top — so the card and its rack
+        // always move together as one piece. "pop" slides a single clicked card out of its rack.
+        const current = cards.map((_, i) => ({ ...floorSpot[i], y: 0, attach: 0, pop: 0, color: new THREE.Color(colors.card) }));
+        const target = cards.map(() => ({ x: 0, y: 0, z: 0, ry: 0, sy: 1, attach: 0, color: new THREE.Color() }));
 
         /* ---------- racks (one per group) ---------- */
         const racks = genres.map((name, g) => {
@@ -190,7 +198,7 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
             label.innerHTML = `<span class="rank"></span><span class="name">${name.toUpperCase()}</span><br/><span class="count">${counts[g].toLocaleString("en-US")}</span>`;
             labelHost.appendChild(label);
 
-            return { genre: g, length, base, hit, group, label, z: 0, targetZ: 0, rank: g, pull: 0, visible: 0, dim: 0 };
+            return { genre: g, length, base, hit, group, label, z: 0, targetZ: 0, rank: g, pull: 0, hover: 0, visible: 0, dim: 0, liftY: 0, liftZ: 0 };
         });
 
         const alphabetical = genres.map((_, g) => g).sort((a, b) => genres[a].localeCompare(genres[b]));
@@ -228,22 +236,41 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
         /* ---------- mouse picking ---------- */
         const raycaster = new THREE.Raycaster();
         const pointer = new THREE.Vector2();
-        let hovered = -1;
+        let hovered = -1;       // rack under the mouse
+        let hoveredCard = -1;   // card under the mouse (only inside the pulled-out rack)
         let downAt: [number, number] | null = null;
 
-        function pick(event: PointerEvent): number {
-            if (liveRef.current.stage < 3) {
-                return -1;
+        // Find what is under the mouse: a card of the open rack first, otherwise a rack
+        function pick(event: PointerEvent): { genre: number; card: number } {
+            const none = { genre: -1, card: -1 };
+            const { stage: s, selected: sel } = liveRef.current;
+            if (s < 3) {
+                return none;
             }
+
             pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
             raycaster.setFromCamera(pointer, camera);
-            const hit = raycaster.intersectObjects(racks.map((rack) => rack.hit), false)[0];
-            return hit ? hit.object.userData.genre : -1;
+
+            if (sel >= 0) {
+                // Cards move every frame, so refresh the bounding sphere before testing them
+                cardMesh.computeBoundingSphere();
+                const cardHit = raycaster
+                    .intersectObject(cardMesh, false)
+                    .find((h) => h.instanceId !== undefined && cards[h.instanceId].genre === sel && cards[h.instanceId].pass);
+                if (cardHit && cardHit.instanceId !== undefined) {
+                    return { genre: sel, card: cardHit.instanceId };
+                }
+            }
+
+            const rackHit = raycaster.intersectObjects(racks.map((rack) => rack.hit), false)[0];
+            return rackHit ? { genre: rackHit.object.userData.genre, card: -1 } : none;
         }
 
         function handleMove(event: PointerEvent) {
-            hovered = pick(event);
-            renderer.domElement.style.cursor = hovered >= 0 ? "pointer" : "grab";
+            const hit = pick(event);
+            hovered = hit.genre;
+            hoveredCard = hit.card;
+            renderer.domElement.style.cursor = hit.genre >= 0 ? "pointer" : "grab";
         }
 
         function handleDown(event: PointerEvent) {
@@ -255,9 +282,19 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
             if (!downAt || Math.hypot(event.clientX - downAt[0], event.clientY - downAt[1]) > 5) {
                 return;
             }
-            const g = pick(event);
-            const { selected: selectedNow, onSelect: select } = liveRef.current;
-            select(g >= 0 && g !== selectedNow ? g : -1);
+            const hit = pick(event);
+            const { selected: sel, selectedCard: selCard, onSelect: select, onSelectCard: selectCard } = liveRef.current;
+
+            if (hit.card >= 0) {
+                // A card in the open rack: open it (or close it if it is already open)
+                selectCard(hit.card === selCard ? -1 : hit.card);
+            } else if (hit.genre >= 0 && hit.genre !== sel) {
+                // Another rack: pull it out
+                select(hit.genre);
+            } else {
+                // Same rack or empty space: put everything back
+                select(-1);
+            }
         }
 
         renderer.domElement.addEventListener("pointermove", handleMove);
@@ -289,7 +326,7 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
         let frameId = 0;
 
         function tick() {
-            const { stage: s, selected: sel, theme: th } = liveRef.current;
+            const { stage: s, selected: sel, selectedCard: selCard, theme: th } = liveRef.current;
             const dt = Math.min(clock.getDelta(), 0.05);
             const time = clock.elapsedTime;
             const ease = 1 - Math.pow(0.002, dt);
@@ -303,26 +340,33 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
             card.set(colors.card);
             dim.set(colors.dim);
 
-            // Racks: order, visibility, pulled out, dimmed
+            // Racks: order, visibility, pulled out, hover lift, dimmed
             shelve(s >= 4 ? byCount : alphabetical);
             racks.forEach((rack) => {
                 const targetVisible = s >= 3 ? 1 : 0;
                 const targetPull = rack.genre === sel ? 1 : 0;
+                const targetHover = s >= 3 && hovered === rack.genre && rack.genre !== sel ? 1 : 0;
                 const targetDim = (s >= 5 && rack.rank >= LIMIT) || (sel >= 0 && rack.genre !== sel) ? 1 : 0;
 
                 rack.z += (rack.targetZ - rack.z) * ease;
                 rack.visible += (targetVisible - rack.visible) * ease;
                 rack.pull += (targetPull - rack.pull) * ease;
+                rack.hover += (targetHover - rack.hover) * ease * 1.5;
                 rack.dim += (targetDim - rack.dim) * ease;
 
-                rack.group.position.set(RACK_X0, rack.pull * PULL_Y, rack.z + rack.pull * PULL_Z);
+                // One position for the whole rack; the base and its cards both use it
+                rack.liftY = rack.pull * PULL_Y + rack.hover * HOVER_Y;
+                rack.liftZ = rack.z + rack.pull * PULL_Z;
+
+                rack.group.position.set(RACK_X0, rack.liftY, rack.liftZ);
                 (rack.base.material as THREE.MeshStandardMaterial).opacity = rack.visible * (1 - rack.dim * 0.6);
 
                 // Move the HTML label next to the rack
-                projected.set(RACK_X0 - 0.2, 0.25 + rack.pull * PULL_Y, rack.z + rack.pull * PULL_Z).project(camera);
+                projected.set(RACK_X0 - 0.2, 0.25 + rack.liftY, rack.liftZ).project(camera);
                 rack.label.style.left = `${(projected.x * 0.5 + 0.5) * window.innerWidth}px`;
                 rack.label.style.top = `${(-projected.y * 0.5 + 0.5) * window.innerHeight}px`;
-                rack.label.style.opacity = String(rack.visible * (1 - rack.dim * 0.7));
+                rack.label.style.opacity = String(rack.visible * (1 - rack.dim * (sel >= 0 ? 0.9 : 0.7)));
+                rack.label.style.zIndex = rack.genre === sel ? "2" : "1";
                 (rack.label.querySelector(".rank") as HTMLElement).textContent = s >= 4 ? `#${rack.rank + 1}  ` : "";
                 rack.label.classList.toggle("active", hovered === rack.genre || sel === rack.genre);
             });
@@ -332,6 +376,12 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
                 const goal = target[i];
                 const spot = floorSpot[i];
                 const rack = racks[c.genre];
+                const filed = s >= 3 && c.pass;
+
+                // Position inside the rack (rack position + slot), used once the card is filed
+                const rackX = RACK_X0 + slot[i] * pitch;
+                const rackY = 0.05 + rack.liftY;
+                const rackZ = rack.liftZ;
 
                 if (s === 0 || (s < 3 && c.pass)) {
                     // On the floor (raw collection, $match, $unwind)
@@ -351,15 +401,17 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
                     goal.color.copy(bg);
                 } else {
                     // Filed into its rack ($group, $sort, $limit)
-                    goal.x = RACK_X0 + slot[i] * pitch;
-                    goal.z = rack.z + rack.pull * PULL_Z;
-                    goal.y = 0.05 + rack.pull * PULL_Y;
+                    goal.x = rackX;
+                    goal.y = rackY;
+                    goal.z = rackZ;
                     goal.ry = 0;
                     goal.sy = 1 - rack.dim * 0.55;
                     goal.color.copy(genreColors[c.genre]).lerp(dim, rack.dim * 0.85);
                 }
+                goal.attach = filed ? 1 : 0;
 
-                // Move a little towards the goal (each card at a slightly different speed)
+                // Move a little towards the goal (each card at a slightly different speed,
+                // so they arrive one after another when they are filed)
                 const now = current[i];
                 const speed = easeCards * (0.55 + ((i * 7919) % 100) / 140);
                 now.x += (goal.x - now.x) * speed;
@@ -367,31 +419,51 @@ export default function ArchiveScene({ data, stage, selected, theme, onSelect }:
                 now.z += (goal.z - now.z) * speed;
                 now.ry += (goal.ry - now.ry) * speed;
                 now.sy += (goal.sy - now.sy) * speed;
+                now.attach += (goal.attach - now.attach) * speed;
+
+                // A clicked card slides out; a hovered card in the open rack peeks out a little
+                const popGoal = i === selCard ? 1 : i === hoveredCard && sel === c.genre ? 0.3 : 0;
+                now.pop += (popGoal - now.pop) * ease * 1.5;
 
                 blended.copy(goal.color);
                 if (hovered === c.genre && s >= 3 && c.pass && sel < 0) {
                     blended.lerp(accent, 0.35);
                 }
+                if (i === selCard) {
+                    blended.lerp(accent, 0.3);
+                }
                 now.color.lerp(blended, ease);
 
+                // Once attached, the card sits exactly at its rack slot, so it moves with the rack as one piece
+                const a = now.attach;
+                position.set(
+                    now.x * (1 - a) + rackX * a,
+                    now.y * (1 - a) + rackY * a + now.pop * CARD_POP_Y,
+                    now.z * (1 - a) + rackZ * a + now.pop * CARD_POP_Z,
+                );
                 rotation.setFromAxisAngle(up, now.ry);
-                position.set(now.x, now.y, now.z);
                 scale.set(1, Math.max(now.sy, 0.001), 1);
                 matrix.compose(position, rotation, scale);
                 cardMesh.setMatrixAt(i, matrix);
                 cardMesh.setColorAt(i, now.color);
+
+                if (i === selCard) {
+                    focusPoint.copy(position);
+                }
             });
             cardMesh.instanceMatrix.needsUpdate = true;
             if (cardMesh.instanceColor) {
                 cardMesh.instanceColor.needsUpdate = true;
             }
 
-            // Keep the selected rack in focus, otherwise focus the centre of the scene
+            // Keep the opened card / rack in focus, otherwise focus the centre of the scene
             controls.update();
-            if (sel >= 0) {
-                focusPoint.set(RACK_X0 + racks[sel].length / 2, 0.4, racks[sel].z + PULL_Z);
-            } else {
-                focusPoint.copy(controls.target);
+            if (selCard < 0) {
+                if (sel >= 0) {
+                    focusPoint.set(RACK_X0 + racks[sel].length / 2, 0.4 + racks[sel].liftY, racks[sel].liftZ);
+                } else {
+                    focusPoint.copy(controls.target);
+                }
             }
             const focus = bokeh.uniforms as unknown as { focus: { value: number } };
             focus.focus.value += (camera.position.distanceTo(focusPoint) - focus.focus.value) * ease;

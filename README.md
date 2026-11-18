@@ -12,7 +12,8 @@ Every card is a document. Step through the pipeline and watch the collection tur
 | `$group` | Cards are filed into racks — rack length = count |
 | `$sort` | Racks are re-shelved, biggest first |
 | `$limit` | Only the top 5 racks stay lit |
-| click a rack | Runs a second pipeline (`$match → $sort → $limit`) for that genre |
+| click a rack | Pulls the rack out and runs a second pipeline (`$match → $sort → $limit`) for that genre |
+| click a card | Slides that card out and loads the single document with `findOne({ _id })` |
 
 ## Setup
 
@@ -51,7 +52,8 @@ components/
 lib/
   pipeline.ts           Stage definitions and pipeline code (shared)
   getArchiveData.ts     Aggregation pipelines for the page ($group counts + $sample of cards)
-  getTopMovies.ts       Server Action for the drill-down query
+  getTopMovies.ts       Server Action for the drill-down query (aggregate)
+  getMovie.ts           Server Action for one document (findOne by _id)
   demoData.ts           Fallback data when no database is set
   types.ts              Shared TypeScript types
 db.ts                   MongoDB connection helper
@@ -62,3 +64,4 @@ db.ts                   MongoDB connection helper
 - `page.tsx` is a server component. It calls `getArchiveData()`, which runs the real pipeline (`$match → $unwind → $group → $sort`) and a `$sample` of documents to draw as cards.
 - The page uses ISR (`revalidate = 3600`): it is regenerated at most once an hour instead of querying the database on every visit.
 - Clicking a rack calls the `getTopMovies()` Server Action, which runs a new pipeline on the server and returns only the fields the client needs.
+- Clicking a single card calls the `getMovie()` Server Action. This one is not a pipeline: it looks up one document directly with `findOne({ _id })`, which shows the difference between `find` and `aggregate`.
