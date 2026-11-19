@@ -2,7 +2,7 @@
 
 CS303 Show & Tell — a 3D data archive that visualizes a **MongoDB aggregation pipeline**, built with Next.js (App Router) and three.js.
 
-The data layer reads a real Steam library from **`steam-analytics.games`** in MongoDB Atlas. Step through the aggregation stages, click a genre rack to query its most-played entries, or click a card to load an individual game.
+The data layer reads a real Steam library from **`steam-analytics.games`** in MongoDB Atlas. Step through the aggregation stages, click a genre rack to query its most-played entries, or click a card to inspect its actual stage document as JSON.
 
 | Stage | Query meaning / current scene |
 |---|---|
@@ -13,7 +13,7 @@ The data layer reads a real Steam library from **`steam-analytics.games`** in Mo
 | `$sort` | Rank by count descending, then genre name ascending |
 | `$limit` | Keep the actual final 5 groups; all 16 genre racks are shown before this stage |
 | click a rack | Return up to 8 played entries in that genre, ordered by playtime descending, then AppID ascending |
-| click a card | Load the game with `findOne({ _id: numericAppId })` |
+| click a card | Show the actual document JSON: genres array before unwind, one genre string after unwind |
 
 ## Setup
 
@@ -116,18 +116,18 @@ Results are complete, without sampling. Each branch fetches at most 2,001 docume
 
 `GenreGroup` describes aggregation output: `_id` is a genre name here, with `count` and `totalMinutes`. It is a different document shape from a stored game.
 
-`ArchiveCard` is the scene's drawing model. Its string `id`, rack index, and copy positions are prepared from actual stage outputs for the existing animation. This conversion stays at the scene boundary; it does not change the database schema or game query results. `getGame()` validates and converts the scene's string AppID for its numeric database lookup.
+`ArchiveCard` is the scene's drawing model. Its string `id`, rack index, and copy positions are prepared from actual stage outputs for the existing animation. This conversion stays at the scene boundary; it does not change the database schema or game query results. The detail panel uses the numeric AppID to find the stage document, also matching the selected genre after unwind to distinguish copies.
 
 - The page uses ISR (`revalidate = 3600`), allowing cached pages to refresh at most once an hour.
 - `getTopGames()` returns numeric `_id`, game name, and playtime minutes as `GameSummary` records. It filters by selected genre and positive playtime, sorts by `playtimeMinutes: -1, _id: 1`, and limits to 8 entries.
-- `getGame()` validates the ID as a positive safe integer and queries numeric `_id`. It returns name, genres, playtime, and last-played time. Invalid or missing IDs return `null`; repeated genre cards resolve to the same game.
+- Clicking a card reads `data.stages` directly, without another database request. Before unwind it displays the collection or match document; after unwind it displays that game–genre copy. At group, sort, and limit, selecting a rack or card shows that stage's aggregate document (`_id`, `count`, `totalMinutes`). Groups absent from the final limit output are reported as absent. The standalone `getGame()` action remains available for original-document lookups but is no longer called by the detail panel.
 - Database reads happen on the server. No runtime Steam API calls or database writes are performed.
 
 ## Visualization semantics
 
 The existing layout, controls, themes, and animation transitions are preserved. Cards are stacked per input game before `$unwind`, then fan out into the copies MongoDB returned. A placeholder keeps a game visible until the stage where it disappears. All genre groups appear at `$group`; `$sort` and `$limit` use the actual returned order and final genre IDs. The scene uses the teammate's expanded palette, cycling only if genres outnumber available colours.
 
-Racks represent aggregate documents, while the cards inside illustrate their contributing games. MongoDB itself emits one document per genre at `$group`, not one per contributing card. The raw stage outputs are available in the data contract; an on-screen intermediate JSON viewer is deferred.
+Racks represent aggregate documents, while the cards inside illustrate their contributing games. MongoDB itself emits one document per genre at `$group`, not one per contributing card. Clicking a game card shows its real stage JSON. A separate viewer for every output document at each stage is deferred.
 
 ## Verification
 
@@ -149,4 +149,4 @@ TypeScript (`npx tsc --noEmit --incremental false`), focused ESLint on changed f
 
 On 2026-11-19, the stepwise integration was checked against all six direct MongoDB prefixes: **177 → 101 → 302 → 16 → 16 → 5**. The displayed pipeline was compared with the executed definition. Card membership, per-rack counts, Terraria's four copies, sort order, and final groups passed. An in-memory change to the match predicate confirmed that drawing data follows query output. Empty input and overflow rejection for every stage were checked with a mocked collection.
 
-TypeScript, focused ESLint (including the scene), and whitespace checks passed again. All six stages were clicked in the browser, which reported no console errors; the existing dev page returned HTTP 200. The intermediate JSON panel remains deferred.
+TypeScript, focused ESLint (including the scene), and whitespace checks passed again. All six stages were clicked in the browser, which reported no console errors; the existing dev page returned HTTP 200. The full intermediate-results inspector remains deferred; individual card JSON is available in the detail panel.

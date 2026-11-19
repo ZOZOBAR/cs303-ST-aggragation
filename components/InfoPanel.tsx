@@ -1,6 +1,6 @@
 import CodeBlock from "@/components/CodeBlock";
-import { ArchiveData, GameDetail, GameSummary } from "@/lib/types";
-import { PIPELINE_CODE, STAGES, drillDownCode } from "@/lib/pipeline";
+import { ArchiveData, GameSummary } from "@/lib/types";
+import { PIPELINE_CODE, STAGES } from "@/lib/pipeline";
 
 type InfoPanelProps = {
     data: ArchiveData;
@@ -10,8 +10,6 @@ type InfoPanelProps = {
     topGames: GameSummary[];
     loading: boolean;
     selectedCard: number;
-    game: GameDetail | null;
-    gameLoading: boolean;
     onNext: () => void;
     onBack: () => void;
     onCloseCard: () => void;
@@ -19,14 +17,26 @@ type InfoPanelProps = {
 
 // Right column: explains the current stage, or shows the result of the drill-down query
 export default function InfoPanel(props: InfoPanelProps) {
-    const { data, stage, selected, rank, topGames, loading, selectedCard, game, gameLoading, onNext, onBack, onCloseCard } = props;
+    const { data, stage, selected, rank, topGames, loading, selectedCard, onNext, onBack, onCloseCard } = props;
+
+    const groupOutputs = stage === 3 ? data.stages.group
+        : stage === 4 ? data.stages.sort : stage === 5 ? data.stages.limit : [];
+    const groupIndex = selected >= 0 ? selected : data.cards[selectedCard]?.genre ?? -1;
+    const groupDocument = groupOutputs.find((doc) => doc._id === data.genres[groupIndex]);
 
     // Document view: a single card was clicked
     if (selectedCard >= 0) {
         const cardGenre = data.cards[selectedCard].genre;
         const genre = selected >= 0 ? data.genres[selected] : cardGenre >= 0 ? data.genres[cardGenre] : "collection";
         const backLabel = selected >= 0 ? `Back to ${genre}` : "Back to pipeline";
-        const id = data.cards[selectedCard].id;
+        const id = Number(data.cards[selectedCard].id);
+        const documents = stage === 0 ? data.stages.collection
+            : stage === 1 ? data.stages.match : data.stages.unwind;
+        // AppID alone is insufficient after unwind: each genre has its own copy.
+        const game = documents.find((doc) => doc._id === id &&
+            (stage < 2 || doc.genres === data.genres[cardGenre]));
+        const document = stage >= 3 ? groupDocument : game;
+        const documentLines = document ? JSON.stringify(document, null, 2).split("\n") : [];
 
         return (
             <section className="info-panel">
@@ -37,9 +47,8 @@ export default function InfoPanel(props: InfoPanelProps) {
                         <span>_id</span>
                     </div>
 
-                    {gameLoading && <p className="info-meta">Running findOne…</p>}
-                    {!gameLoading && !game && <p className="info-meta">Document not found.</p>}
-                    {!gameLoading && game && (
+                    {!document && <p className="info-meta">Document is not present in this stage.</p>}
+                    {game && (
                         <>
                             <h2 className="info-title movie-title">{game.name}</h2>
                             <p className="info-sub">
@@ -48,14 +57,19 @@ export default function InfoPanel(props: InfoPanelProps) {
 
                             <dl className="detail-list">
                                 <dt>genres</dt>
-                                <dd>{game.genres.join(", ") || "None recorded"}</dd>
+                                <dd>{Array.isArray(game.genres) ? game.genres.join(", ") || "None recorded" : game.genres}</dd>
                                 <dt>last played (UTC)</dt>
                                 <dd>{game.lastPlayedUnix === null ? "Unavailable" : new Date(game.lastPlayedUnix * 1000).toISOString().slice(0, 10)}</dd>
                             </dl>
                         </>
                     )}
 
-                    <CodeBlock lines={[`db.games.findOne({`, `  _id: ${id}`, `})`]} past={[0, 1, 2]} />
+                    {document && (
+                        <>
+                            <p className="info-meta">{STAGES[stage].op} output document</p>
+                            <CodeBlock lines={documentLines} past={documentLines.map((_, i) => i)} />
+                        </>
+                    )}
 
                     <button className="panel-action" onClick={onCloseCard}>
                         <span>{backLabel}</span>
@@ -69,6 +83,7 @@ export default function InfoPanel(props: InfoPanelProps) {
     // Drill-down view: a rack was clicked
     if (selected >= 0) {
         const genre = data.genres[selected];
+        const documentLines = groupDocument ? JSON.stringify(groupDocument, null, 2).split("\n") : [];
 
         return (
             <section className="info-panel">
@@ -82,7 +97,11 @@ export default function InfoPanel(props: InfoPanelProps) {
                     <p className="info-sub">{data.counts[selected].toLocaleString("en-US")} documents</p>
                     <p className="info-meta">rank #{rank + 1} by entry count · games by playtime · click a card to open it</p>
 
-                    <CodeBlock lines={drillDownCode(genre)} past={[0, 1, 2, 3, 4, 5, 6]} />
+                    {groupDocument ? (
+                        <CodeBlock lines={documentLines} past={documentLines.map((_, i) => i)} />
+                    ) : (
+                        <p className="info-meta">Document is not present in this stage.</p>
+                    )}
 
                     <ul className="movie-list">
                         {loading && <li className="loading">Running query…</li>}

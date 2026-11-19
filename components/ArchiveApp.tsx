@@ -6,9 +6,8 @@ import InfoPanel from "@/components/InfoPanel";
 import { StageCounter, StageScrubber } from "@/components/StageControls";
 import { Brand, TopBar } from "@/components/TopBar";
 import getTopGames from "@/lib/getTopGames";
-import getGame from "@/lib/getGame";
 import { STAGES } from "@/lib/pipeline";
-import { ArchiveData, GameDetail, Theme, GameSummary } from "@/lib/types";
+import { ArchiveData, Theme, GameSummary } from "@/lib/types";
 
 const LAST_STAGE = STAGES.length - 1;
 const PLAY_DELAY = 2800;
@@ -26,8 +25,6 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     const [topGames, setTopGames] = useState<GameSummary[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedCardIndex, setSelectedCardIndex] = useState(-1);
-    const [game, setGame] = useState<GameDetail | null>(null);
-    const [gameLoading, setGameLoading] = useState(false);
 
     // Racks can only be selected after $group, so the selection is ignored before that
     const selected = stage >= 3 ? selectedGenre : -1;
@@ -65,20 +62,9 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             .finally(() => setLoading(false));
     }
 
-    // Clicking a single card runs the getGame Server Action (findOne by _id)
+    // The panel reads the selected card's actual document from data.stages.
     function selectCard(index: number) {
         setSelectedCardIndex(index);
-
-        if (index < 0) {
-            return;
-        }
-
-        const card = data.cards[index];
-        setGameLoading(true);
-        getGame(card.id)
-            .then((detail) => setGame(detail))
-            .catch(() => setGame(null))
-            .finally(() => setGameLoading(false));
     }
 
     function togglePlay() {
@@ -168,8 +154,6 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
                 topGames={topGames}
                 loading={loading}
                 selectedCard={selectedCard}
-                game={game}
-                gameLoading={gameLoading}
                 onNext={() => changeStage(stage === LAST_STAGE ? 0 : stage + 1)}
                 onBack={() => setSelectedGenre(-1)}
                 onCloseCard={() => setSelectedCardIndex(-1)}
