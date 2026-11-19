@@ -14,7 +14,7 @@ type Popped = {
     open: boolean;        // false while it is flying in or back
 };
 
-const POP_MS = 420;       // length of the pop-out / shrink-back animation
+const POP_MS = 650;       // length of the pop-out / shrink-back animation
 
 // Shows a pipeline as code, with the current stage highlighted.
 // Click the block: the whole block pops out into the middle of the scene, big. Click again: it goes back.
@@ -61,13 +61,15 @@ export default function CodeBlock({ lines, current = -1, past = [] }: CodeBlockP
     });
 
     // Closed state: small, on top of the block in the panel. Open state: centred in the free area.
+    // Only transform and opacity animate, so the movement is one smooth curve.
     let cardStyle: React.CSSProperties = {};
     if (popped && !popped.open) {
         const { from } = popped;
+        const centreX = window.innerWidth * (window.innerWidth > 900 ? 0.32 : 0.5);
+        const dx = from.left + from.width / 2 - centreX;
+        const dy = from.top + from.height / 2 - window.innerHeight / 2;
         cardStyle = {
-            left: from.left + from.width / 2,
-            top: from.top + from.height / 2,
-            transform: "translate(-50%, -50%) scale(0.4)",
+            transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(0.4)`,
             opacity: 0,
         };
     }
