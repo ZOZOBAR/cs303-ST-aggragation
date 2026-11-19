@@ -10,25 +10,14 @@ type CodeBlockProps = {
 };
 
 type Popped = {
-    index: number;
-    from: DOMRect;        // where the clicked line sits, so the pop-out grows out of it
+    from: DOMRect;        // where the block sits in the panel, so the pop-out grows out of it
     open: boolean;        // false while it is flying in or back
 };
 
 const POP_MS = 420;       // length of the pop-out / shrink-back animation
 
-// Turns one pipeline line like `  {"$match":{...}},` into readable, indented JSON
-function pretty(line: string) {
-    const text = line.trim().replace(/,$/, "");
-    try {
-        return JSON.stringify(JSON.parse(text), null, 2);
-    } catch {
-        return text;
-    }
-}
-
 // Shows a pipeline as code, with the current stage highlighted.
-// Click a line: it pops out into the middle of the scene, big and indented. Click again: it goes back.
+// Click the block: the whole block pops out into the middle of the scene, big. Click again: it goes back.
 export default function CodeBlock({ lines, current = -1, past = [] }: CodeBlockProps) {
     const blockRef = useRef<HTMLPreElement>(null);
     const [popped, setPopped] = useState<Popped | null>(null);
@@ -39,61 +28,66 @@ export default function CodeBlock({ lines, current = -1, past = [] }: CodeBlockP
         setHost(blockRef.current?.closest(".app") ?? document.body);
     }, []);
 
-    function openLine(index: number, event: React.MouseEvent<HTMLSpanElement>) {
-        if (popped) {
-            closeLine();
+    function openBlock() {
+        if (popped || !blockRef.current) {
+            closeBlock();
             return;
         }
-        setPopped({ index, from: event.currentTarget.getBoundingClientRect(), open: false });
+        setPopped({ from: blockRef.current.getBoundingClientRect(), open: false });
         // Next frame: switch to the open state so the CSS transition runs
         requestAnimationFrame(() => requestAnimationFrame(() =>
             setPopped((p) => (p ? { ...p, open: true } : p))
         ));
     }
 
-    function closeLine() {
+    function closeBlock() {
         setPopped((p) => (p ? { ...p, open: false } : p));
         setTimeout(() => setPopped(null), POP_MS);
     }
 
-    // Closed state: a small box on top of the clicked line. Open state: centred in the free area.
+    // The same lines, used both in the panel and in the pop-out
+    const codeLines = lines.map((line, i) => {
+        let className = "code-line";
+        if (i === current) {
+            className += " current";
+        } else if (past.includes(i)) {
+            className += " past";
+        }
+        return (
+            <span key={i} className={className}>
+                {line}
+            </span>
+        );
+    });
+
+    // Closed state: small, on top of the block in the panel. Open state: centred in the free area.
     let cardStyle: React.CSSProperties = {};
     if (popped && !popped.open) {
         const { from } = popped;
         cardStyle = {
             left: from.left + from.width / 2,
             top: from.top + from.height / 2,
-            transform: "translate(-50%, -50%) scale(0.3)",
+            transform: "translate(-50%, -50%) scale(0.4)",
             opacity: 0,
         };
     }
 
     return (
         <>
-            <pre className="code-block" ref={blockRef}>
-                {lines.map((line, i) => {
-                    let className = "code-line";
-                    if (i === current) {
-                        className += " current";
-                    } else if (past.includes(i)) {
-                        className += " past";
-                    }
-                    if (popped?.index === i) {
-                        className += " popped";
-                    }
-                    return (
-                        <span key={i} className={className} onClick={(e) => openLine(i, e)}>
-                            {line}
-                        </span>
-                    );
-                })}
+            <pre
+                className={popped ? "code-block popped" : "code-block"}
+                ref={blockRef}
+                onClick={openBlock}
+                title="Click to enlarge"
+            >
+                {codeLines}
             </pre>
 
             {popped && host && createPortal(
-                <div className={popped.open ? "code-pop open" : "code-pop"} onClick={closeLine}>
+                <div className={popped.open ? "code-pop open" : "code-pop"} onClick={closeBlock}>
                     <pre className="code-pop-card" style={cardStyle}>
-                        <span className="code-pop-label">line {popped.index + 1} · click to close</span>
-                        {pretty(lines[popped.index])}
+                        <span className="code-pop-label">click to close</span>
+                        {codeLines}
                     </pre>
                 </div>,
                 host
