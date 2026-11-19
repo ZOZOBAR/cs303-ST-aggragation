@@ -4,7 +4,7 @@ import { ArchiveData } from "@/lib/types";
 export const PLAYED_MATCH = { playtimeMinutes: { $gt: 0 } };
 export const GENRE_COUNT = 10;
 export const LIMIT = 5;
-export const CARD_COUNT = 900;
+export const DOC_COUNT = 500;   // games sampled for the 3D scene
 export const TOP_GAMES = 8;
 
 // Shared by the live aggregation and the displayed pipeline.
@@ -43,7 +43,7 @@ export const STAGES: Stage[] = [
         op: "collection",
         title: "db.games",
         sub: "The raw collection",
-        text: "The collection has one document per Steam app. Cards currently preview sampled game–genre pairs; the animation does not yet show the raw input documents.",
+        text: "The collection has one document per Steam app. Each card on the floor is one game document from a random $sample.",
         code: [0],
         meta: (data) => `${format(data.total)} documents · unordered`,
     },
@@ -59,7 +59,7 @@ export const STAGES: Stage[] = [
         op: "$unwind",
         title: "$unwind",
         sub: "Split the genres array",
-        text: "A game can have several Store genres. $unwind emits one document per genre, preserving AppID and playtime. Empty arrays are dropped. Card splitting is pending the animation update.",
+        text: "A game can have several Store genres. $unwind splits each card into one copy per genre, keeping AppID and playtime. Games with an empty genres array are dropped.",
         code: [1, 2],
         meta: (data) => `${format(data.matched)} → ${format(data.unwound)} documents`,
     },

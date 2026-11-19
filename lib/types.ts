@@ -9,12 +9,15 @@ export type SteamGame = {
     metadataFound: boolean;
 };
 
-// Compatibility sample: one game–genre pair AFTER unwind, not an input document.
-// The teammate's animation will need full input genre arrays to animate splitting.
+// One card in the scene = one (game, genre) copy, as produced by $unwind.
+// Copies of the same game share "doc" and stand on the same spot until $unwind splits them.
 export type ArchiveCard = {
-    id: string;
-    genre: number;
-    pass: boolean;
+    id: string;      // the game's AppID
+    genre: number;   // preview rack index; -2 = genre outside the preview racks; -1 = no genres
+    pass: boolean;   // passes $match (playtimeMinutes > 0)
+    doc: number;     // which sampled game this copy belongs to
+    copy: number;    // position of this genre in the game's genres array
+    copies: number;  // how many genres the game has
 };
 
 export type GenreGroup = {
@@ -26,7 +29,8 @@ export type GenreGroup = {
 export type ArchiveData = {
     genres: string[];       // up to 10 preview racks, alphabetically ordered
     counts: number[];       // played-entry counts in the same order
-    cards: ArchiveCard[];   // sampled game–genre pairs, not collection documents
+    cards: ArchiveCard[];   // one card per (sampled game, genre) copy
+    sampled: number;        // games in the $sample
     total: number;
     matched: number;
     unwound: number;        // all rows after match → unwind, before sampling

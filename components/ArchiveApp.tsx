@@ -180,7 +180,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             <StageScrubber stage={stage} onChange={changeStage} />
 
             <footer className="footer">
-                <div className="micro">{data.cards.length} cards · sampled game–genre pairs (preview)</div>
+                <div className="micro">{data.sampled} games · random $sample of the collection</div>
                 <div className="micro">← → step / drag orbit / click a rack, then a card</div>
                 <div className="micro">MongoDB Atlas</div>
             </footer>

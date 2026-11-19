@@ -58,7 +58,7 @@ button {
     text-transform: uppercase;
 }
 
-/* 3D canvas and the labels drawn on top of it */
+/* 3D canvas */
 .scene {
     position: fixed;
     inset: 0;
@@ -66,44 +66,6 @@ button {
 
 .scene canvas {
     display: block;
-}
-
-.scene-labels {
-    position: fixed;
-    inset: 0;
-    z-index: 3;
-    pointer-events: none;
-}
-
-.rack-label {
-    position: absolute;
-    padding-right: 12px;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    text-align: right;
-    white-space: nowrap;
-    transform: translate(-100%, -50%);
-    transition: opacity 0.5s;
-}
-
-.rack-label .count {
-    color: var(--ink);
-    font-size: 13px;
-    font-weight: 500;
-}
-
-.rack-label .name {
-    color: var(--mute);
-    letter-spacing: 0.08em;
-}
-
-.rack-label .rank {
-    color: var(--accent);
-}
-
-.rack-label.active .name,
-.rack-label.active .count {
-    color: var(--accent);
 }
 
 /* Fades the scene behind the info panel so the text stays readable */
