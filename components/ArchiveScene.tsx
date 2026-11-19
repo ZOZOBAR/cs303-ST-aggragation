@@ -53,7 +53,16 @@ const CARD_POP_Z = 0.55;  // how far a clicked card slides out of its rack
 const CARD_POP_Y = 0.16;
 const FLOOR_POP_Y = 0.5;  // a clicked card on the floor rises...
 const FLOOR_POP_T = 0.35; // ...and leans towards the camera
-const FILE_DELAY = 0.5;   // $unwind → $group: cards leave one after another over this many seconds
+const SIDE_EASE = 0.015;  // how fast a clicked card switches sides when the camera moves (ease-out, ~0.4 s)
+const MOTION_EASE = 0.015; // same pace for stage transitions: cards moving, filing, racks re-sorting
+const FILE_DELAY = 0.8;   // $unwind → $group: cards leave one after another over this many seconds
+
+// Depth of field, based on photography: focus on the current subject and keep the whole
+// subject inside the sharp zone. Blur grows with the distance in front of / behind it.
+const EDGE_BLUR = 0.0011;  // blur allowed at the edge of the subject (≈ still sharp)
+const MAX_BLUR = 0.005;    // strongest blur (far background / close foreground)
+const CARD_SUBJECT = 0.9;  // size of the sharp zone around an opened card
+const OVERVIEW_SHARP = 0.4; // nothing selected: only the middle part of the data is sharp, the far end blurs
 
 // Camera: fixed viewing angle, distance fitted to the data
 const VIEW_DIR = new THREE.Vector3(-8.9, 9.7, 12.6).normalize();
@@ -220,7 +229,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         // x / y / z is the card's own position. Once a card is filed into a rack, "attach" becomes 1
         // and the rack's movement (pull out, hover lift) is added on top — so the card and its rack
         // always move together as one piece. "pop" slides a single clicked card out of its rack.
-        const current = cards.map((c) => ({ ...docSpot[c.doc], y: 0, attach: 0, pop: 0, color: new THREE.Color(colors.card) }));
+        const current = cards.map((c) => ({ ...docSpot[c.doc], y: 0, attach: 0, pop: 0, side: 1, sideGoal: 1, color: new THREE.Color(colors.card) }));
         const target = cards.map(() => ({ x: 0, y: 0, z: 0, ry: 0, sy: 1, attach: 0, color: new THREE.Color() }));
 
         /* ---------- racks (one per group) ---------- */
@@ -291,6 +300,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         /* ---------- camera framing: centre and fit whatever is on screen ---------- */
         const frameTarget = new THREE.Vector3();
         let frameDistance = 20;
+        let frameRadius = 6;    // size of everything on screen, used as the sharp zone
         let framing = false;   // true while the camera is moving to frame the data
         let lastFramedStage = -1;
 
@@ -304,6 +314,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             const share = window.innerWidth > 900 ? 1 - PANEL_SHARE : 1;
             const halfH = Math.atan(Math.tan(halfV) * camera.aspect * share);
             frameDistance = (radius / Math.sin(Math.min(halfV, halfH))) * 0.8;
+            frameRadius = radius;
             frameTarget.set(0, 0, s >= 3 ? 0.2 : 0);
 
             // Shadows and fog follow the size of the scene
@@ -335,7 +346,8 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         /* ---------- depth of field (post-processing) ---------- */
         const composer = new EffectComposer(renderer);
         composer.addPass(new RenderPass(scene, camera));
-        const bokeh = new BokehPass(scene, camera, { focus: 14, aperture: 0.0016, maxblur: 0.006 });
+        const bokeh = new BokehPass(scene, camera, { focus: 14, aperture: EDGE_BLUR / 6, maxblur: MAX_BLUR });
+        const lens = bokeh.uniforms as unknown as { focus: { value: number }; aperture: { value: number } };
         composer.addPass(bokeh);
         composer.addPass(new OutputPass());
 
@@ -464,7 +476,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             const dt = Math.min(clock.getDelta(), 0.05);
             const time = clock.elapsedTime;
             const ease = 1 - Math.pow(0.002, dt);
-            const easeCards = 1 - Math.pow(0.03, dt);
+            const easeCards = 1 - Math.pow(MOTION_EASE, dt);
 
             if (th !== currentTheme) {
                 currentTheme = th;
@@ -513,7 +525,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 const targetHover = s >= 3 && hovered === rack.genre && rack.genre !== sel ? 1 : 0;
                 const targetDim = (s >= 5 && !finalGenres.has(rack.name)) || (sel >= 0 && rack.genre !== sel) ? 1 : 0;
 
-                rack.z += (rack.targetZ - rack.z) * ease;
+                rack.z += (rack.targetZ - rack.z) * easeCards;   // $sort: racks re-shelve slowly
                 rack.visible += (targetVisible - rack.visible) * ease;
                 rack.pull += (targetPull - rack.pull) * ease;
                 rack.hover += (targetHover - rack.hover) * ease * 1.5;
@@ -595,7 +607,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 const filing = goal.attach === 1 && now.attach < 0.98;
                 if (filing) {
                     const delay = (((i * 7919) % 100) / 100) * FILE_DELAY;
-                    speed = time - fileStartedAt < delay ? 0 : (1 - Math.pow(0.08, dt)) * variance;
+                    speed = time - fileStartedAt < delay ? 0 : easeCards * variance;
                 }
 
                 now.x += (goal.x - now.x) * speed;
@@ -630,9 +642,17 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 // or (on the floor) rises and leans towards the camera
                 if (now.pop > 0.001) {
                     if (a > 0.5) {
-                        const side = camera.position.z >= position.z ? 1 : -1;
+                        // Pick the side the camera is on, with a small dead zone so it does not flicker
+                        const dz = camera.position.z - position.z;
+                        if (dz > 0.4) {
+                            now.sideGoal = 1;
+                        } else if (dz < -0.4) {
+                            now.sideGoal = -1;
+                        }
+                        // Ease-out: the card slides back through the rack and out the other side
+                        now.side += (now.sideGoal - now.side) * (1 - Math.pow(SIDE_EASE, dt));
                         position.y += now.pop * CARD_POP_Y;
-                        position.z += now.pop * CARD_POP_Z * side;
+                        position.z += now.pop * CARD_POP_Z * now.side;
                     } else {
                         toCamera.set(camera.position.x - position.x, 0, camera.position.z - position.z).normalize();
                         position.y += now.pop * FLOOR_POP_Y;
@@ -663,8 +683,16 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                     focusPoint.copy(controls.target);
                 }
             }
-            const focus = bokeh.uniforms as unknown as { focus: { value: number } };
-            focus.focus.value += (camera.position.distanceTo(focusPoint) - focus.focus.value) * ease;
+            // Size of the subject = size of the sharp zone (whole data → one rack → one card)
+            let subject = frameRadius * OVERVIEW_SHARP;
+            if (selCard >= 0) {
+                subject = CARD_SUBJECT;
+            } else if (sel >= 0) {
+                subject = racks[sel].length / 2 + 0.8;
+            }
+            // Pull focus smoothly, like a lens: focus distance and aperture both ease
+            lens.focus.value += (camera.position.distanceTo(focusPoint) - lens.focus.value) * ease;
+            lens.aperture.value += (EDGE_BLUR / subject - lens.aperture.value) * ease;
 
             composer.render();
             frameId = requestAnimationFrame(tick);
