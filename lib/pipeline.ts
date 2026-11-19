@@ -2,13 +2,11 @@ import { ArchiveData } from "@/lib/types";
 
 // Shared settings for the pipeline (used by the server queries and the UI)
 export const PLAYED_MATCH = { playtimeMinutes: { $gt: 0 } };
-export const GENRE_COUNT = 10;
 export const LIMIT = 5;
-export const DOC_COUNT = 500;   // games sampled for the 3D scene
 export const TOP_GAMES = 8;
 
 // Shared by the live aggregation and the displayed pipeline.
-export const GENRE_PIPELINE = [
+export const GUIDED_PIPELINE = [
     { $match: PLAYED_MATCH },
     { $unwind: "$genres" },
     { $group: {
@@ -17,6 +15,7 @@ export const GENRE_PIPELINE = [
         totalMinutes: { $sum: "$playtimeMinutes" },
     } },
     { $sort: { count: -1 as const, _id: 1 as const } },
+    { $limit: LIMIT },
 ];
 
 // Each stage of the pipeline shown on the page
@@ -31,8 +30,9 @@ export type Stage = {
 
 export const PIPELINE_CODE = [
     "db.games.aggregate([",
-    ...GENRE_PIPELINE.map((stage) => `  ${JSON.stringify(stage)},`),
-    `  { $limit: ${LIMIT} }`,
+    ...GUIDED_PIPELINE.map((stage, index) =>
+        `  ${JSON.stringify(stage)}${index < GUIDED_PIPELINE.length - 1 ? "," : ""}`
+    ),
     "])",
 ];
 
@@ -43,7 +43,7 @@ export const STAGES: Stage[] = [
         op: "collection",
         title: "db.games",
         sub: "The raw collection",
-        text: "The collection has one document per Steam app. Each card on the floor is one game document from a random $sample.",
+        text: "The collection has one document per Steam app. Each card on the floor represents one document from the actual collection-stage output.",
         code: [0],
         meta: (data) => `${format(data.total)} documents · unordered`,
     },
@@ -67,9 +67,9 @@ export const STAGES: Stage[] = [
         op: "$group",
         title: "$group",
         sub: "Group by genre, count",
-        text: "Each genre becomes one aggregate document with count and totalMinutes. Rack length represents played-entry count. The scene previews up to 10 leading groups; shared genres mean time totals overlap.",
+        text: "Each genre becomes one aggregate document with count and totalMinutes. Rack length represents played-entry count. Every output group has a rack; shared genres mean time totals overlap.",
         code: [1, 2, 3],
-        meta: (data) => `${format(data.unwound)} documents → ${data.groupCount} groups · ${data.genres.length} preview racks`,
+        meta: (data) => `${format(data.unwound)} documents → ${data.groupCount} groups`,
     },
     {
         op: "$sort",

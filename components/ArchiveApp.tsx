@@ -5,10 +5,10 @@ import ArchiveScene from "@/components/ArchiveScene";
 import InfoPanel from "@/components/InfoPanel";
 import { StageCounter, StageScrubber } from "@/components/StageControls";
 import { Brand, TopBar } from "@/components/TopBar";
-import getTopMovies from "@/lib/getTopMovies";
-import getMovie from "@/lib/getMovie";
+import getTopGames from "@/lib/getTopGames";
+import getGame from "@/lib/getGame";
 import { STAGES } from "@/lib/pipeline";
-import { ArchiveData, MovieDetail, Theme, TopMovie } from "@/lib/types";
+import { ArchiveData, GameDetail, Theme, GameSummary } from "@/lib/types";
 
 const LAST_STAGE = STAGES.length - 1;
 const PLAY_DELAY = 2800;
@@ -23,11 +23,11 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     const [selectedGenre, setSelectedGenre] = useState(-1);
     const [theme, setTheme] = useState<Theme>("day");
     const [playing, setPlaying] = useState(false);
-    const [topMovies, setTopMovies] = useState<TopMovie[]>([]);
+    const [topGames, setTopGames] = useState<GameSummary[]>([]);
     const [loading, setLoading] = useState(false);
     const [selectedCardIndex, setSelectedCardIndex] = useState(-1);
-    const [movie, setMovie] = useState<MovieDetail | null>(null);
-    const [movieLoading, setMovieLoading] = useState(false);
+    const [game, setGame] = useState<GameDetail | null>(null);
+    const [gameLoading, setGameLoading] = useState(false);
 
     // Racks can only be selected after $group, so the selection is ignored before that
     const selected = stage >= 3 ? selectedGenre : -1;
@@ -37,13 +37,10 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     const cardInfo = data.cards[selectedCardIndex];
     const selectedCard = cardInfo && (stage < 3 || (selected >= 0 && cardInfo.genre === selected)) ? selectedCardIndex : -1;
 
-    // Rank of the selected rack (alphabetical before $sort, by count after)
-    const order = data.genres.map((_, g) => g);
-    if (stage >= 4) {
-        order.sort((a, b) => data.counts[b] - data.counts[a]);
-    } else {
-        order.sort((a, b) => data.genres[a].localeCompare(data.genres[b]));
-    }
+    // Preserve MongoDB's actual sort order, including its tie-breaking rule.
+    const order = stage >= 4
+        ? data.stages.sort.map((group) => data.genres.indexOf(group._id))
+        : data.genres.map((_, g) => g);
     const rank = order.indexOf(selected);
 
     function changeStage(next: number) {
@@ -62,13 +59,13 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         }
 
         setLoading(true);
-        getTopMovies(data.genres[genre])
-            .then((movies) => setTopMovies(movies))
-            .catch(() => setTopMovies([]))
+        getTopGames(data.genres[genre])
+            .then((games) => setTopGames(games))
+            .catch(() => setTopGames([]))
             .finally(() => setLoading(false));
     }
 
-    // Clicking a single card runs the getMovie Server Action (findOne by _id)
+    // Clicking a single card runs the getGame Server Action (findOne by _id)
     function selectCard(index: number) {
         setSelectedCardIndex(index);
 
@@ -77,11 +74,11 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         }
 
         const card = data.cards[index];
-        setMovieLoading(true);
-        getMovie(card.id)
-            .then((detail) => setMovie(detail))
-            .catch(() => setMovie(null))
-            .finally(() => setMovieLoading(false));
+        setGameLoading(true);
+        getGame(card.id)
+            .then((detail) => setGame(detail))
+            .catch(() => setGame(null))
+            .finally(() => setGameLoading(false));
     }
 
     function togglePlay() {
@@ -168,11 +165,11 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
                 stage={stage}
                 selected={selected}
                 rank={rank}
-                topMovies={topMovies}
+                topGames={topGames}
                 loading={loading}
                 selectedCard={selectedCard}
-                movie={movie}
-                movieLoading={movieLoading}
+                game={game}
+                gameLoading={gameLoading}
                 onNext={() => changeStage(stage === LAST_STAGE ? 0 : stage + 1)}
                 onBack={() => setSelectedGenre(-1)}
                 onCloseCard={() => setSelectedCardIndex(-1)}
@@ -182,7 +179,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             <StageScrubber stage={stage} onChange={changeStage} />
 
             <footer className="footer">
-                <div className="micro">{data.sampled} games · random $sample of the collection</div>
+                <div className="micro">{data.total} games · MongoDB stage results</div>
                 <div className="micro">← → step / drag orbit / click a rack, then a card</div>
                 <div className="micro">MongoDB Atlas</div>
             </footer>

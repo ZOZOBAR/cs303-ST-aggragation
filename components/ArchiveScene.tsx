@@ -9,7 +9,6 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { BokehPass } from "three/examples/jsm/postprocessing/BokehPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { ArchiveData, Theme } from "@/lib/types";
-import { LIMIT } from "@/lib/pipeline";
 
 type ArchiveSceneProps = {
     data: ArchiveData;
@@ -38,7 +37,7 @@ const CARD_W = 0.045;
 const CARD_H = 0.78;
 const CARD_D = 0.56;
 
-// Floor grid (one spot per sampled game)
+// Floor grid (one spot per collection-stage game)
 const SPOT_X = 0.52;      // wide enough for a game's copies to fan out at $unwind
 const SPOT_Z = 0.46;
 const FAN = 0.1;          // distance between the copies of one game after $unwind
@@ -168,7 +167,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         floor.receiveShadow = true;
         scene.add(floor);
 
-        /* ---------- floor layout: one spot per sampled game, centred on the origin ---------- */
+        /* ---------- floor layout: one spot per input game, centred on the origin ---------- */
         const docCount = cards.reduce((max, c) => Math.max(max, c.doc + 1), 0);
         const columns = Math.max(1, Math.ceil(Math.sqrt(docCount * 1.6)));
         const rows = Math.max(1, Math.ceil(docCount / columns));
@@ -198,7 +197,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         cardMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
         scene.add(cardMesh);
 
-        const genreColors = PALETTE.map((hex) => new THREE.Color(hex));
+        const genreColors = genres.map((_, g) => new THREE.Color(PALETTE[g % PALETTE.length]));
 
         // Position of each card inside its rack
         const slot = new Array(cards.length).fill(0);
@@ -277,7 +276,8 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         document.fonts?.ready.then(() => racks.forEach((rack) => (rack.labelKey = "")));
 
         const alphabetical = genres.map((_, g) => g).sort((a, b) => genres[a].localeCompare(genres[b]));
-        const byCount = genres.map((_, g) => g).sort((a, b) => counts[b] - counts[a]);
+        const byCount = data.stages.sort.map((group) => genres.indexOf(group._id));
+        const finalGenres = new Set(data.stages.limit.map((group) => group._id));
 
         function shelve(orderList: number[]) {
             orderList.forEach((g, i) => {
@@ -511,7 +511,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 const targetVisible = s >= 3 ? 1 : 0;
                 const targetPull = rack.genre === sel ? 1 : 0;
                 const targetHover = s >= 3 && hovered === rack.genre && rack.genre !== sel ? 1 : 0;
-                const targetDim = (s >= 5 && rack.rank >= LIMIT) || (sel >= 0 && rack.genre !== sel) ? 1 : 0;
+                const targetDim = (s >= 5 && !finalGenres.has(rack.name)) || (sel >= 0 && rack.genre !== sel) ? 1 : 0;
 
                 rack.z += (rack.targetZ - rack.z) * ease;
                 rack.visible += (targetVisible - rack.visible) * ease;
@@ -551,8 +551,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
 
                 const sinks =
                     (s >= 1 && !c.pass) ||              // $match: not played
-                    (s >= 2 && c.genre === -1) ||       // $unwind: empty genres array
-                    (s >= 3 && c.genre === -2);         // $group: genre outside the preview racks
+                    (s >= 2 && c.genre === -1);         // no output in the actual $unwind result
                 dropped[i] = sinks;
 
                 if (filed && rack) {

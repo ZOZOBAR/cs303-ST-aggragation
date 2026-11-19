@@ -1,84 +1,68 @@
 import getCollection, { GAMES_COLLECTION } from "@/db";
-import { ArchiveCard, ArchiveData, GenreGroup, SteamGame } from "@/lib/types";
-import { DOC_COUNT, GENRE_COUNT, GENRE_PIPELINE, LIMIT, PLAYED_MATCH } from "@/lib/pipeline";
+import { ArchiveCard, ArchiveData, ArchiveStages, SteamGame } from "@/lib/types";
+import { GUIDED_PIPELINE } from "@/lib/pipeline";
 
-// Server-only, read-only queries against the existing Steam import.
+// Complete results are required for the animation. Fail explicitly if this small
+// educational dataset outgrows the bound rather than animate a truncated sample.
+const MAX_STAGE_DOCUMENTS = 2000;
+
 export default async function getArchiveData(): Promise<ArchiveData> {
     const games = await getCollection<SteamGame>(GAMES_COLLECTION);
+    const stageNames = ["collection", "match", "unwind", "group", "sort", "limit"] as const;
 
-    // Both branches share match → unwind → group → sort. The result branch
-    // executes the displayed limit; the preview supports the existing 10 racks.
-    const [aggregation] = await games.aggregate<{
-        preview: GenreGroup[];
-        result: GenreGroup[];
-        stats: { groupCount: number; unwound: number }[];
-    }>([
-        ...GENRE_PIPELINE,
-        { $facet: {
-            preview: [{ $limit: GENRE_COUNT }],
-            result: [{ $limit: LIMIT }],
-            stats: [{ $group: {
-                _id: null,
-                groupCount: { $sum: 1 },
-                unwound: { $sum: "$count" },
-            } }],
-        } },
-    ]).toArray();
+    // Each facet executes a successive prefix against the same collection input.
+    // MongoDB computes membership, genre copies, counts, sorting, and the limit.
+    const [stages] = await games.aggregate<ArchiveStages>([
+        { $facet: Object.fromEntries(stageNames.map((name, index) => [name, [
+            ...GUIDED_PIPELINE.slice(0, index),
+            { $limit: MAX_STAGE_DOCUMENTS + 1 },
+        ]])) },
+    ], { maxTimeMS: 5000 }).toArray();
 
-    const groups = [...aggregation.preview].sort((a, b) => a._id.localeCompare(b._id));
+    for (const name of stageNames) {
+        if (stages[name].length > MAX_STAGE_DOCUMENTS) {
+            throw new Error(`Guided demo stage ${name} exceeds ${MAX_STAGE_DOCUMENTS} documents; complete stage results are required.`);
+        }
+    }
+
+    // Alphabetical placement before sort is a presentation choice: $group itself
+    // does not promise an order. Keep every group, including those outside top 5.
+    const groups = [...stages.group].sort((a, b) => a._id.localeCompare(b._id));
     const genres = groups.map((group) => group._id);
     const counts = groups.map((group) => group.count);
+    const matchedIds = new Set(stages.match.map((game) => game._id));
+    const copiesById = new Map<number, typeof stages.unwind>();
+    for (const output of stages.unwind) {
+        const copies = copiesById.get(output._id) ?? [];
+        copies.push(output);
+        copiesById.set(output._id, copies);
+    }
 
-    // Sample whole documents (before $unwind), so the scene can show the real input:
-    // one card per game first, then $unwind splits it into one copy per genre.
-    const sample = await games.aggregate<{
-        _id: number; genres: string[]; playtimeMinutes: number;
-    }>([
-        { $sample: { size: DOC_COUNT } },
-        { $project: { genres: 1, playtimeMinutes: 1 } },
-    ]).toArray();
-
-    // Build the cards: one per (game, genre) copy. All copies of a game start stacked
-    // on the same spot; the $unwind stage spreads them apart.
-    //   genre >= 0 → one of the preview racks
-    //   genre = -1 → nothing to show after $unwind (no genres, or only genres outside the racks)
-    // Copies for genres outside the racks are not drawn, so nothing has to disappear at $group.
+    // Only adapt MongoDB results to drawing coordinates; do not reimplement
+    // match predicates or unwind arrays in JavaScript.
     const cards: ArchiveCard[] = [];
-    sample.forEach((doc, docIndex) => {
-        const docGenres = (Array.isArray(doc.genres) ? doc.genres : []).filter((name) => genres.includes(name));
-        const pass = doc.playtimeMinutes > 0;
-
-        if (docGenres.length === 0) {
-            cards.push({ id: String(doc._id), genre: -1, pass, doc: docIndex, copy: 0, copies: 1 });
+    stages.collection.forEach((game, doc) => {
+        const pass = matchedIds.has(game._id);
+        const copies = copiesById.get(game._id) ?? [];
+        if (copies.length === 0) {
+            // Keeps the input card visible until match or unwind removes it.
+            cards.push({ id: String(game._id), genre: -1, pass, doc, copy: 0, copies: 1 });
             return;
         }
-
-        docGenres.forEach((name, copy) => {
-            const index = genres.indexOf(name);
-            cards.push({
-                id: String(doc._id),
-                genre: index >= 0 ? index : -2,
-                pass,
-                doc: docIndex,
-                copy,
-                copies: docGenres.length,
-            });
+        copies.forEach((output, copy) => {
+            const genre = genres.indexOf(output.genres);
+            if (genre < 0) throw new Error("Unwind output has no corresponding genre group.");
+            cards.push({ id: String(game._id), genre, pass, doc, copy, copies: copies.length });
         });
     });
 
-    const [total, matched] = await Promise.all([
-        games.countDocuments(),
-        games.countDocuments(PLAYED_MATCH),
-    ]);
-    const stats = aggregation.stats[0];
-
-    // Let connection/query failures reach Next's dev error reporting, never demo data.
     return {
-        genres, counts, cards, total, matched,
-        sampled: sample.length,
-        unwound: stats?.unwound ?? 0,
-        groupCount: stats?.groupCount ?? 0,
-        topGenres: aggregation.result,
+        stages, genres, counts, cards,
+        total: stages.collection.length,
+        matched: stages.match.length,
+        unwound: stages.unwind.length,
+        groupCount: stages.group.length,
+        topGenres: stages.limit,
         source: "mongodb",
     };
 }

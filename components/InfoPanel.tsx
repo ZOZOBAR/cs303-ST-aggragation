@@ -1,5 +1,5 @@
 import CodeBlock from "@/components/CodeBlock";
-import { ArchiveData, MovieDetail, TopMovie } from "@/lib/types";
+import { ArchiveData, GameDetail, GameSummary } from "@/lib/types";
 import { PIPELINE_CODE, STAGES, drillDownCode } from "@/lib/pipeline";
 
 type InfoPanelProps = {
@@ -7,11 +7,11 @@ type InfoPanelProps = {
     stage: number;
     selected: number;
     rank: number;
-    topMovies: TopMovie[];
+    topGames: GameSummary[];
     loading: boolean;
     selectedCard: number;
-    movie: MovieDetail | null;
-    movieLoading: boolean;
+    game: GameDetail | null;
+    gameLoading: boolean;
     onNext: () => void;
     onBack: () => void;
     onCloseCard: () => void;
@@ -19,7 +19,7 @@ type InfoPanelProps = {
 
 // Right column: explains the current stage, or shows the result of the drill-down query
 export default function InfoPanel(props: InfoPanelProps) {
-    const { data, stage, selected, rank, topMovies, loading, selectedCard, movie, movieLoading, onNext, onBack, onCloseCard } = props;
+    const { data, stage, selected, rank, topGames, loading, selectedCard, game, gameLoading, onNext, onBack, onCloseCard } = props;
 
     // Document view: a single card was clicked
     if (selectedCard >= 0) {
@@ -37,20 +37,20 @@ export default function InfoPanel(props: InfoPanelProps) {
                         <span>_id</span>
                     </div>
 
-                    {movieLoading && <p className="info-meta">Running findOne…</p>}
-                    {!movieLoading && !movie && <p className="info-meta">Document not found.</p>}
-                    {!movieLoading && movie && (
+                    {gameLoading && <p className="info-meta">Running findOne…</p>}
+                    {!gameLoading && !game && <p className="info-meta">Document not found.</p>}
+                    {!gameLoading && game && (
                         <>
-                            <h2 className="info-title movie-title">{movie.name}</h2>
+                            <h2 className="info-title movie-title">{game.name}</h2>
                             <p className="info-sub">
-                                {movie.playtimeMinutes.toLocaleString("en-US")} min played
+                                {game.playtimeMinutes.toLocaleString("en-US")} min played
                             </p>
 
                             <dl className="detail-list">
                                 <dt>genres</dt>
-                                <dd>{movie.genres.join(", ") || "None recorded"}</dd>
+                                <dd>{game.genres.join(", ") || "None recorded"}</dd>
                                 <dt>last played (UTC)</dt>
-                                <dd>{movie.lastPlayedUnix === null ? "Unavailable" : new Date(movie.lastPlayedUnix * 1000).toISOString().slice(0, 10)}</dd>
+                                <dd>{game.lastPlayedUnix === null ? "Unavailable" : new Date(game.lastPlayedUnix * 1000).toISOString().slice(0, 10)}</dd>
                             </dl>
                         </>
                     )}
@@ -86,11 +86,11 @@ export default function InfoPanel(props: InfoPanelProps) {
 
                     <ul className="movie-list">
                         {loading && <li className="loading">Running query…</li>}
-                        {!loading && topMovies.map((movie, i) => (
-                            <li key={movie.id} style={{ animationDelay: `${i * 45}ms` }}>
+                        {!loading && topGames.map((game, i) => (
+                            <li key={game._id} style={{ animationDelay: `${i * 45}ms` }}>
                                 <span className="index">{String(i + 1).padStart(2, "0")}</span>
-                                <span>{movie.name}</span>
-                                <span className="rating">{movie.playtimeMinutes.toLocaleString("en-US")} min</span>
+                                <span>{game.name}</span>
+                                <span className="rating">{game.playtimeMinutes.toLocaleString("en-US")} min</span>
                             </li>
                         ))}
                     </ul>
