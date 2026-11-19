@@ -41,6 +41,8 @@ const CARD_D = 0.56;
 const SPOT_X = 0.52;      // wide enough for a game's copies to fan out at $unwind
 const SPOT_Z = 0.46;
 const FAN = 0.1;          // distance between the copies of one game after $unwind
+const JITTER = 0.45;     // random sideways offset of a floor spot, as a share of SPOT_X
+const TURN = 0.25;       // largest random turn of a floor card (radians, ≈ 14°)
 
 // Racks
 const RACK_GAP = 1.4;    // room between racks for the floor labels
@@ -67,6 +69,7 @@ const OVERVIEW_SHARP = 0.4; // nothing selected: only the middle part of the dat
 // Camera: fixed viewing angle, distance fitted to the data
 const VIEW_DIR = new THREE.Vector3(-8.9, 9.7, 12.6).normalize();
 const PANEL_SHARE = 0.36; // part of a wide screen covered by the info panel
+const FLOOR_FIT = 0.8;    // camera distance for the floor stages (smaller = bigger on screen)
 
 // Seeded random numbers, so the layout is the same on every visit
 function makeRandom(seed: number) {
@@ -185,14 +188,17 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         order.forEach((docIndex, k) => {
             const column = k % columns;
             const row = Math.floor(k / columns);
+            // Staggered like bricks (every other row shifted half a spot), plus a little
+            // random offset and turn, so the floor looks laid out by hand rather than on a grid
+            const stagger = row % 2 === 1 ? SPOT_X * 0.5 : 0;
             docSpot[docIndex] = {
-                x: (column - (columns - 1) / 2) * SPOT_X + (random() - 0.5) * 0.08,
-                z: (row - (rows - 1) / 2) * SPOT_Z + (random() - 0.5) * 0.08,
-                ry: (random() - 0.5) * 0.22,
+                x: (column - (columns - 1) / 2) * SPOT_X + stagger - SPOT_X * 0.25 + (random() - 0.5) * SPOT_X * JITTER,
+                z: (row - (rows - 1) / 2) * SPOT_Z + (random() - 0.5) * SPOT_Z * 0.3,
+                ry: (random() - 0.5) * TURN * 2,
                 sy: 0.75 + random() * 0.5,
             };
         });
-        const floorWidth = columns * SPOT_X + 1;
+        const floorWidth = (columns + 0.5) * SPOT_X + 1;
         const floorDepth = rows * SPOT_Z + 1;
 
         /* ---------- cards: one InstancedMesh draws all of them ---------- */
@@ -313,7 +319,8 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             const halfV = THREE.MathUtils.degToRad(camera.fov / 2);
             const share = window.innerWidth > 900 ? 1 - PANEL_SHARE : 1;
             const halfH = Math.atan(Math.tan(halfV) * camera.aspect * share);
-            frameDistance = (radius / Math.sin(Math.min(halfV, halfH))) * 0.8;
+            // The floor is flat, so its bounding sphere is too big: come closer so it fills the frame
+            frameDistance = (radius / Math.sin(Math.min(halfV, halfH))) * (s >= 3 ? 0.8 : FLOOR_FIT);
             frameRadius = radius;
             frameTarget.set(0, 0, s >= 3 ? 0.2 : 0);
 

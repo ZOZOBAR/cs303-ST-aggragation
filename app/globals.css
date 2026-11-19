@@ -278,6 +278,73 @@ button {
     box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* Each code line can be clicked to pop it out */
+.code-line {
+    cursor: pointer;
+}
+
+.code-line:hover {
+    color: var(--ink);
+}
+
+.code-line.popped {
+    color: var(--accent);
+}
+
+/* Pop-out: the clicked line, big and indented, in the middle of the scene.
+   It flies in from the line (inline style) to here; the backdrop catches the click to close. */
+.code-pop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    cursor: pointer;
+    background: transparent;
+    transition: background 0.42s;
+}
+
+.code-pop.open {
+    background: var(--soft);
+}
+
+.code-pop-card {
+    position: fixed;
+    left: 32vw;                     /* middle of the area left of the info panel */
+    top: 50vh;
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+    max-width: 56vw;
+    max-height: 70vh;
+    overflow: auto;
+    padding: 28px 34px;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    background: var(--bg);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+    color: var(--ink);
+    font-family: var(--mono);
+    font-size: clamp(15px, 1.5vw, 24px);
+    line-height: 1.6;
+    white-space: pre;
+    transition: left 0.42s cubic-bezier(0.22, 1, 0.36, 1), top 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+        transform 0.42s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.3s;
+}
+
+.code-pop-label {
+    display: block;
+    margin-bottom: 14px;
+    color: var(--mute);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+@media (max-width: 900px) {
+    .code-pop-card {
+        left: 50vw;
+        max-width: 90vw;
+    }
+}
+
 /* Drill-down list of top movies */
 .movie-list {
     max-height: 210px;
