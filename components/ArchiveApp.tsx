@@ -32,8 +32,10 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     // Racks can only be selected after $group, so the selection is ignored before that
     const selected = stage >= 3 ? selectedGenre : -1;
 
-    // A single card can only be open inside the open rack
-    const selectedCard = selected >= 0 && data.cards[selectedCardIndex]?.genre === selected ? selectedCardIndex : -1;
+    // A single card can be opened on the floor (raw / $match / $unwind),
+    // or after $group only inside the open rack
+    const cardInfo = data.cards[selectedCardIndex];
+    const selectedCard = cardInfo && (stage < 3 || (selected >= 0 && cardInfo.genre === selected)) ? selectedCardIndex : -1;
 
     // Rank of the selected rack (alphabetical before $sort, by count after)
     const order = data.genres.map((_, g) => g);

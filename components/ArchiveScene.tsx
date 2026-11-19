@@ -22,7 +22,10 @@ type ArchiveSceneProps = {
 };
 
 // One colour per genre (muted palette)
-const PALETTE = ["#c8553d", "#e2b04a", "#e9a6a0", "#4d5a6a", "#8fa58a", "#2f6f73", "#5b3a4e", "#d98b6a", "#7aa0c4", "#3b3f46"];
+const PALETTE = [
+    "#c8553d", "#e2b04a", "#e9a6a0", "#4d5a6a", "#8fa58a", "#2f6f73", "#5b3a4e", "#d98b6a", "#7aa0c4", "#3b3f46",
+    "#a3b18a", "#b5838d", "#6d597a", "#e07a5f", "#81b29a", "#f2cc8f", "#3d405b", "#9c6644", "#7f8fa6", "#c9ada7",
+];
 
 // Scene colours and light strength for each theme
 const THEMES = {
@@ -49,6 +52,9 @@ const PULL_Y = 0.55;      // how high a clicked rack rises
 const HOVER_Y = 0.14;     // how high a rack rises under the mouse
 const CARD_POP_Z = 0.55;  // how far a clicked card slides out of its rack
 const CARD_POP_Y = 0.16;
+const FLOOR_POP_Y = 0.5;  // a clicked card on the floor rises...
+const FLOOR_POP_T = 0.35; // ...and leans towards the camera
+const FILE_DELAY = 0.5;   // $unwind → $group: cards leave one after another over this many seconds
 
 // Camera: fixed viewing angle, distance fitted to the data
 const VIEW_DIR = new THREE.Vector3(-8.9, 9.7, 12.6).normalize();
@@ -285,7 +291,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         /* ---------- camera framing: centre and fit whatever is on screen ---------- */
         const frameTarget = new THREE.Vector3();
         let frameDistance = 20;
-        let framingUntil = 0;
+        let framing = false;   // true while the camera is moving to frame the data
         let lastFramedStage = -1;
 
         function updateFrameGoal(s: number) {
@@ -324,7 +330,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         lastFramedStage = liveRef.current.stage;
 
         // Stop the automatic framing as soon as the user orbits or zooms
-        controls.addEventListener("start", () => (framingUntil = 0));
+        controls.addEventListener("start", () => (framing = false));
 
         /* ---------- depth of field (post-processing) ---------- */
         const composer = new EffectComposer(renderer);
@@ -349,6 +355,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         /* ---------- mouse picking ---------- */
         const raycaster = new THREE.Raycaster();
         const pointer = new THREE.Vector2();
+        const dropped = new Array(cards.length).fill(false);  // cards sunk into the floor right now
         let hovered = -1;       // rack under the mouse
         let hoveredCard = -1;   // card under the mouse (only inside the pulled-out rack)
         let downAt: [number, number] | null = null;
@@ -357,12 +364,18 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         function pick(event: PointerEvent): { genre: number; card: number } {
             const none = { genre: -1, card: -1 };
             const { stage: s, selected: sel } = liveRef.current;
-            if (s < 3) {
-                return none;
-            }
 
             pointer.set((event.clientX / window.innerWidth) * 2 - 1, -(event.clientY / window.innerHeight) * 2 + 1);
             raycaster.setFromCamera(pointer, camera);
+
+            // Before $group every card on the floor can be clicked (except the ones that sank)
+            if (s < 3) {
+                cardMesh.computeBoundingSphere();
+                const floorHit = raycaster
+                    .intersectObject(cardMesh, false)
+                    .find((h) => h.instanceId !== undefined && !dropped[h.instanceId]);
+                return floorHit && floorHit.instanceId !== undefined ? { genre: -1, card: floorHit.instanceId } : none;
+            }
 
             if (sel >= 0) {
                 // Cards move every frame, so refresh the bounding sphere before testing them
@@ -383,7 +396,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             const hit = pick(event);
             hovered = hit.genre;
             hoveredCard = hit.card;
-            renderer.domElement.style.cursor = hit.genre >= 0 ? "pointer" : "grab";
+            renderer.domElement.style.cursor = hit.genre >= 0 || hit.card >= 0 ? "pointer" : "grab";
         }
 
         function handleDown(event: PointerEvent) {
@@ -421,7 +434,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             renderer.setSize(window.innerWidth, window.innerHeight);
             composer.setSize(window.innerWidth, window.innerHeight);
             updateFrameGoal(liveRef.current.stage);
-            framingUntil = clock.elapsedTime + 1.5;
+            framing = true;
         }
         window.addEventListener("resize", handleResize);
 
@@ -440,8 +453,11 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         const other = new THREE.Color();
         const dim = new THREE.Color();
         const blended = new THREE.Color();
+        const toCamera = new THREE.Vector3();
         const clock = new THREE.Clock();
         let frameId = 0;
+        let fileStartedAt = -10;   // when the cards started moving from the floor into the racks
+        let previousStage = liveRef.current.stage;
 
         function tick() {
             const { stage: s, selected: sel, selectedCard: selCard, theme: th } = liveRef.current;
@@ -460,18 +476,28 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             dim.set(colors.dim);
             ink.set(colors.ink);
 
+            // $unwind → $group: remember the moment, so the cards can leave one after another
+            if (s >= 3 && previousStage < 3) {
+                fileStartedAt = time;
+            }
+            previousStage = s;
+
             // Re-frame the camera whenever the stage changes
             if (s !== lastFramedStage) {
                 lastFramedStage = s;
                 updateFrameGoal(s);
-                framingUntil = time + 2.2;
+                framing = true;
             }
-            if (time < framingUntil) {
+            if (framing) {
                 controls.target.lerp(frameTarget, ease);
                 offset.copy(camera.position).sub(controls.target);
                 const distance = offset.length();
                 offset.setLength(distance + (frameDistance - distance) * ease);
                 camera.position.copy(controls.target).add(offset);
+                // Stop once the camera has arrived (works the same on fast and slow computers)
+                if (Math.abs(frameDistance - distance) < 0.02 && controls.target.distanceTo(frameTarget) < 0.02) {
+                    framing = false;
+                }
             }
 
             // Fog follows the camera distance, so near data is clear and the far edge fades out
@@ -523,10 +549,11 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 const rackY = 0.05 + (rack ? rack.liftY : 0);
                 const rackZ = rack ? rack.liftZ : 0;
 
-                const dropped =
+                const sinks =
                     (s >= 1 && !c.pass) ||              // $match: not played
                     (s >= 2 && c.genre === -1) ||       // $unwind: empty genres array
                     (s >= 3 && c.genre === -2);         // $group: genre outside the preview racks
+                dropped[i] = sinks;
 
                 if (filed && rack) {
                     // Filed into its rack ($group, $sort, $limit)
@@ -536,7 +563,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                     goal.ry = 0;
                     goal.sy = 1 - rack.dim * 0.55;
                     goal.color.copy(genreColors[c.genre]).lerp(dim, rack.dim * 0.85);
-                } else if (dropped) {
+                } else if (sinks) {
                     // Filtered out: sink into the floor
                     goal.x = spot.x + fan;
                     goal.z = spot.z;
@@ -562,7 +589,16 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 // Move a little towards the goal (each card at a slightly different speed,
                 // so they arrive one after another when they are filed)
                 const now = current[i];
-                const speed = easeCards * (0.55 + ((i * 7919) % 100) / 140);
+                const variance = 0.55 + ((i * 7919) % 100) / 140;
+                let speed = easeCards * variance;
+
+                // Filing into a rack: each card waits its turn, then glides over more slowly
+                const filing = goal.attach === 1 && now.attach < 0.98;
+                if (filing) {
+                    const delay = (((i * 7919) % 100) / 100) * FILE_DELAY;
+                    speed = time - fileStartedAt < delay ? 0 : (1 - Math.pow(0.08, dt)) * variance;
+                }
+
                 now.x += (goal.x - now.x) * speed;
                 now.y += (goal.y - now.y) * speed;
                 now.z += (goal.z - now.z) * speed;
@@ -571,7 +607,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 now.attach += (goal.attach - now.attach) * speed;
 
                 // A clicked card slides out; a hovered card in the open rack peeks out a little
-                const popGoal = i === selCard ? 1 : i === hoveredCard && sel === c.genre ? 0.3 : 0;
+                const popGoal = i === selCard ? 1 : i === hoveredCard && (s < 3 || sel === c.genre) ? 0.3 : 0;
                 now.pop += (popGoal - now.pop) * ease * 1.5;
 
                 blended.copy(goal.color);
@@ -587,9 +623,23 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
                 const a = now.attach;
                 position.set(
                     now.x * (1 - a) + rackX * a,
-                    now.y * (1 - a) + rackY * a + now.pop * CARD_POP_Y,
-                    now.z * (1 - a) + rackZ * a + now.pop * CARD_POP_Z,
+                    now.y * (1 - a) + rackY * a,
+                    now.z * (1 - a) + rackZ * a,
                 );
+
+                // Clicked card: slides out of the rack towards the side the camera is on,
+                // or (on the floor) rises and leans towards the camera
+                if (now.pop > 0.001) {
+                    if (a > 0.5) {
+                        const side = camera.position.z >= position.z ? 1 : -1;
+                        position.y += now.pop * CARD_POP_Y;
+                        position.z += now.pop * CARD_POP_Z * side;
+                    } else {
+                        toCamera.set(camera.position.x - position.x, 0, camera.position.z - position.z).normalize();
+                        position.y += now.pop * FLOOR_POP_Y;
+                        position.addScaledVector(toCamera, now.pop * FLOOR_POP_T);
+                    }
+                }
                 rotation.setFromAxisAngle(up, now.ry);
                 scale.set(1, Math.max(now.sy, 0.001), 1);
                 matrix.compose(position, rotation, scale);

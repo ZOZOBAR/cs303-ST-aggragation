@@ -13,7 +13,7 @@ export type SteamGame = {
 // Copies of the same game share "doc" and stand on the same spot until $unwind splits them.
 export type ArchiveCard = {
     id: string;      // the game's AppID
-    genre: number;   // preview rack index; -2 = genre outside the preview racks; -1 = no genres
+    genre: number;   // rack index; -1 = nothing to show after $unwind
     pass: boolean;   // passes $match (playtimeMinutes > 0)
     doc: number;     // which sampled game this copy belongs to
     copy: number;    // position of this genre in the game's genres array

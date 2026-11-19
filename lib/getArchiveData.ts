@@ -41,11 +41,11 @@ export default async function getArchiveData(): Promise<ArchiveData> {
     // Build the cards: one per (game, genre) copy. All copies of a game start stacked
     // on the same spot; the $unwind stage spreads them apart.
     //   genre >= 0 → one of the preview racks
-    //   genre = -2 → a genre outside the preview racks (filtered out at $group on screen)
-    //   genre = -1 → the game has no genres, so $unwind drops it
+    //   genre = -1 → nothing to show after $unwind (no genres, or only genres outside the racks)
+    // Copies for genres outside the racks are not drawn, so nothing has to disappear at $group.
     const cards: ArchiveCard[] = [];
     sample.forEach((doc, docIndex) => {
-        const docGenres = Array.isArray(doc.genres) ? doc.genres : [];
+        const docGenres = (Array.isArray(doc.genres) ? doc.genres : []).filter((name) => genres.includes(name));
         const pass = doc.playtimeMinutes > 0;
 
         if (docGenres.length === 0) {

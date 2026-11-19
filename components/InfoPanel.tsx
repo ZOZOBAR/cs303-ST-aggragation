@@ -22,8 +22,10 @@ export default function InfoPanel(props: InfoPanelProps) {
     const { data, stage, selected, rank, topMovies, loading, selectedCard, movie, movieLoading, onNext, onBack, onCloseCard } = props;
 
     // Document view: a single card was clicked
-    if (selected >= 0 && selectedCard >= 0) {
-        const genre = data.genres[selected];
+    if (selectedCard >= 0) {
+        const cardGenre = data.cards[selectedCard].genre;
+        const genre = selected >= 0 ? data.genres[selected] : cardGenre >= 0 ? data.genres[cardGenre] : "collection";
+        const backLabel = selected >= 0 ? `Back to ${genre}` : "Back to pipeline";
         const id = data.cards[selectedCard].id;
 
         return (
@@ -56,7 +58,7 @@ export default function InfoPanel(props: InfoPanelProps) {
                     <CodeBlock lines={[`db.games.findOne({`, `  _id: ${id}`, `})`]} past={[0, 1, 2]} />
 
                     <button className="panel-action" onClick={onCloseCard}>
-                        <span>Back to {genre}</span>
+                        <span>{backLabel}</span>
                         <span className="arrow">↙</span>
                     </button>
                 </div>
