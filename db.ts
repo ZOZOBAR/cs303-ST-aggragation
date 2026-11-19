@@ -1,18 +1,13 @@
-import { MongoClient, Db, Collection } from "mongodb";
+import { MongoClient, Db, Collection, Document } from "mongodb";
 
 const MONGO_URI = process.env.MONGO_URI;
 
-// MongoDB's free sample dataset (Atlas → Load Sample Dataset)
-const DB_NAME = "sample_mflix";
-export const MOVIES_COLLECTION = "movies";
+// The existing imported Steam library.
+const DB_NAME = "steam-analytics";
+export const GAMES_COLLECTION = "games";
 
 let client: MongoClient | null = null;
 let db: Db | null = null;
-
-// Lets the app fall back to demo data when no database is configured
-export function hasDatabase(): boolean {
-    return Boolean(MONGO_URI);
-}
 
 async function connect(): Promise<Db> {
     if (!MONGO_URI) {
@@ -27,12 +22,12 @@ async function connect(): Promise<Db> {
     return client.db(DB_NAME);
 }
 
-export default async function getCollection(
+export default async function getCollection<T extends Document = Document>(
     collectionName: string,
-): Promise<Collection> {
+): Promise<Collection<T>> {
     if (!db) {
         db = await connect();
     }
 
-    return db.collection(collectionName);
+    return db.collection<T>(collectionName);
 }

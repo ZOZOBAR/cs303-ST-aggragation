@@ -39,40 +39,21 @@ export default function InfoPanel(props: InfoPanelProps) {
                     {!movieLoading && !movie && <p className="info-meta">Document not found.</p>}
                     {!movieLoading && movie && (
                         <>
-                            <h2 className="info-title movie-title">{movie.title}</h2>
+                            <h2 className="info-title movie-title">{movie.name}</h2>
                             <p className="info-sub">
-                                {movie.year}
-                                {movie.runtime ? ` · ${movie.runtime} min` : ""}
-                                {movie.rating !== null ? ` · ★ ${movie.rating}` : ""}
+                                {movie.playtimeMinutes.toLocaleString("en-US")} min played
                             </p>
-                            {movie.plot && <p className="info-text">{movie.plot}</p>}
 
                             <dl className="detail-list">
                                 <dt>genres</dt>
-                                <dd>{movie.genres.join(", ")}</dd>
-                                {movie.directors.length > 0 && (
-                                    <>
-                                        <dt>directors</dt>
-                                        <dd>{movie.directors.join(", ")}</dd>
-                                    </>
-                                )}
-                                {movie.cast.length > 0 && (
-                                    <>
-                                        <dt>cast</dt>
-                                        <dd>{movie.cast.join(", ")}</dd>
-                                    </>
-                                )}
-                                {movie.votes !== null && (
-                                    <>
-                                        <dt>imdb.votes</dt>
-                                        <dd>{movie.votes.toLocaleString("en-US")}</dd>
-                                    </>
-                                )}
+                                <dd>{movie.genres.join(", ") || "None recorded"}</dd>
+                                <dt>last played (UTC)</dt>
+                                <dd>{movie.lastPlayedUnix === null ? "Unavailable" : new Date(movie.lastPlayedUnix * 1000).toISOString().slice(0, 10)}</dd>
                             </dl>
                         </>
                     )}
 
-                    <CodeBlock lines={[`db.movies.findOne({`, `  _id: ObjectId("${id}")`, `})`]} past={[0, 1, 2]} />
+                    <CodeBlock lines={[`db.games.findOne({`, `  _id: ${id}`, `})`]} past={[0, 1, 2]} />
 
                     <button className="panel-action" onClick={onCloseCard}>
                         <span>Back to {genre}</span>
@@ -97,7 +78,7 @@ export default function InfoPanel(props: InfoPanelProps) {
                     </div>
                     <h2 className="info-title">{genre}</h2>
                     <p className="info-sub">{data.counts[selected].toLocaleString("en-US")} documents</p>
-                    <p className="info-meta">rank #{rank + 1} · top rated · click a card to open it</p>
+                    <p className="info-meta">rank #{rank + 1} by entry count · games by playtime · click a card to open it</p>
 
                     <CodeBlock lines={drillDownCode(genre)} past={[0, 1, 2, 3, 4, 5, 6]} />
 
@@ -106,8 +87,8 @@ export default function InfoPanel(props: InfoPanelProps) {
                         {!loading && topMovies.map((movie, i) => (
                             <li key={movie.id} style={{ animationDelay: `${i * 45}ms` }}>
                                 <span className="index">{String(i + 1).padStart(2, "0")}</span>
-                                <span>{movie.title} <span className="year">· {movie.year}</span></span>
-                                <span className="rating">★ {movie.rating}</span>
+                                <span>{movie.name}</span>
+                                <span className="rating">{movie.playtimeMinutes.toLocaleString("en-US")} min</span>
                             </li>
                         ))}
                     </ul>
@@ -133,7 +114,7 @@ export default function InfoPanel(props: InfoPanelProps) {
                 <div className="micro">Pipeline / <b>{info.op}</b></div>
                 <div className="info-row">
                     <span>STAGE {String(stage + 1).padStart(3, "0")}</span>
-                    <span>db.movies</span>
+                    <span>db.games</span>
                 </div>
                 <h2 className="info-title">
                     {info.title.startsWith("$") ? <><span>$</span>{info.title.slice(1)}</> : info.title}

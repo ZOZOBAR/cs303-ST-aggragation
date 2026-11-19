@@ -1,59 +1,62 @@
-import getCollection, { hasDatabase, MOVIES_COLLECTION } from "@/db";
-import { ArchiveData } from "@/lib/types";
-import { CARD_COUNT, GENRE_COUNT, YEAR_FROM } from "@/lib/pipeline";
-import { makeDemoArchive } from "@/lib/demoData";
+import getCollection, { GAMES_COLLECTION } from "@/db";
+import { ArchiveData, GenreGroup, SteamGame } from "@/lib/types";
+import { CARD_COUNT, GENRE_COUNT, GENRE_PIPELINE, LIMIT, PLAYED_MATCH } from "@/lib/pipeline";
 
-// Runs on the server when the page is rendered.
-// Uses aggregation pipelines to get everything the 3D archive needs.
+// Server-only, read-only queries against the existing Steam import.
 export default async function getArchiveData(): Promise<ArchiveData> {
-    if (!hasDatabase()) {
-        return makeDemoArchive();
-    }
+    const games = await getCollection<SteamGame>(GAMES_COLLECTION);
 
-    try {
-        const movies = await getCollection(MOVIES_COLLECTION);
+    // Both branches share match → unwind → group → sort. The result branch
+    // executes the displayed limit; the preview supports the existing 10 racks.
+    const [aggregation] = await games.aggregate<{
+        preview: GenreGroup[];
+        result: GenreGroup[];
+        stats: { groupCount: number; unwound: number }[];
+    }>([
+        ...GENRE_PIPELINE,
+        { $facet: {
+            preview: [{ $limit: GENRE_COUNT }],
+            result: [{ $limit: LIMIT }],
+            stats: [{ $group: {
+                _id: null,
+                groupCount: { $sum: 1 },
+                unwound: { $sum: "$count" },
+            } }],
+        } },
+    ]).toArray();
 
-        // 1. The real pipeline: $match → $unwind → $group → $sort
-        //    (we keep the top GENRE_COUNT groups as racks; the page shows $limit visually)
-        const groups = await movies.aggregate<{ _id: string; count: number }>([
-            { $match: { year: { $gte: YEAR_FROM } } },
-            { $unwind: "$genres" },
-            { $group: { _id: "$genres", count: { $sum: 1 } } },
-            { $sort: { count: -1 } },
-            { $limit: GENRE_COUNT },
-        ]).toArray();
+    const groups = [...aggregation.preview].sort((a, b) => a._id.localeCompare(b._id));
+    const genres = groups.map((group) => group._id);
+    const counts = groups.map((group) => group.count);
 
-        // Racks start in alphabetical order; the $sort stage reorders them on the page
-        const sortedGroups = [...groups].sort((a, b) => a._id.localeCompare(b._id));
-        const genres = sortedGroups.map((group) => group._id);
-        const counts = sortedGroups.map((group) => group.count);
+    // Preserve the scene contract only: these are sampled post-unwind pairs.
+    // Include unplayed entries so pass still represents the actual match predicate.
+    const sample = await games.aggregate<{
+        _id: number; genres: string; playtimeMinutes: number;
+    }>([
+        { $unwind: "$genres" },
+        { $match: { genres: { $in: genres } } },
+        { $sample: { size: CARD_COUNT } },
+        { $project: { genres: 1, playtimeMinutes: 1 } },
+    ]).toArray();
 
-        // 2. A random sample of documents to draw as cards.
-        //    $unwind first, so each card is one (movie, genre) pair like after the real $unwind.
-        const sample = await movies.aggregate<{ _id: unknown; genres: string; year: number }>([
-            { $match: { year: { $type: "number" }, genres: { $in: genres } } },
-            { $unwind: "$genres" },
-            { $match: { genres: { $in: genres } } },
-            { $sample: { size: CARD_COUNT } },
-            { $project: { genres: 1, year: 1 } },
-        ]).toArray();
+    const cards = sample.map((doc) => ({
+        id: String(doc._id),
+        genre: genres.indexOf(doc.genres),
+        pass: doc.playtimeMinutes > 0,
+    }));
+    const [total, matched] = await Promise.all([
+        games.countDocuments(),
+        games.countDocuments(PLAYED_MATCH),
+    ]);
+    const stats = aggregation.stats[0];
 
-        // Keep the _id (as a string) so a single card can be opened later
-        const cards = sample.map((doc) => ({
-            id: String(doc._id),
-            genre: genres.indexOf(doc.genres),
-            pass: doc.year >= YEAR_FROM,
-        }));
-
-        // 3. Counts for the info panel
-        const total = await movies.countDocuments();
-        const matched = await movies.countDocuments({ year: { $gte: YEAR_FROM } });
-
-        return { genres, counts, cards, total, matched, source: "mongodb" };
-
-    } catch (error) {
-        // If the database cannot be reached, keep the page working with demo data
-        console.error(error);
-        return makeDemoArchive();
-    }
+    // Let connection/query failures reach Next's dev error reporting, never demo data.
+    return {
+        genres, counts, cards, total, matched,
+        unwound: stats?.unwound ?? 0,
+        groupCount: stats?.groupCount ?? 0,
+        topGenres: aggregation.result,
+        source: "mongodb",
+    };
 }

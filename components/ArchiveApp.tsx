@@ -76,7 +76,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
 
         const card = data.cards[index];
         setMovieLoading(true);
-        getMovie(card.id, data.genres[card.genre])
+        getMovie(card.id)
             .then((detail) => setMovie(detail))
             .catch(() => setMovie(null))
             .finally(() => setMovieLoading(false));
@@ -143,7 +143,7 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         return () => window.removeEventListener("keydown", handleKey);
     }, []);
 
-    const source = data.source === "mongodb" ? "sample_mflix.movies · live" : "demo data";
+    const source = "steam-analytics.games · live";
 
     return (
         <main className={theme === "night" ? "app night" : "app"}>
@@ -180,9 +180,9 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             <StageScrubber stage={stage} onChange={changeStage} />
 
             <footer className="footer">
-                <div className="micro">{data.cards.length} cards · random $sample of the collection</div>
+                <div className="micro">{data.cards.length} cards · sampled game–genre pairs (preview)</div>
                 <div className="micro">← → step / drag orbit / click a rack, then a card</div>
-                <div className="micro">{data.source === "mongodb" ? "MongoDB Atlas" : "No MONGO_URI · demo data"}</div>
+                <div className="micro">MongoDB Atlas</div>
             </footer>
         </main>
     );
