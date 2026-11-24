@@ -1,24 +1,28 @@
 import getCollection, { GAMES_COLLECTION } from "@/db";
 import { ArchiveCard, ArchiveData, ArchiveStages, SteamGame } from "@/lib/types";
-import { GUIDED_PIPELINE } from "@/lib/pipeline";
+import { DEFAULT_QUERY_ID, getQueryPreset, STAGE_NAMES } from "@/lib/pipeline";
 
 // Complete results are required for the animation. Fail explicitly if this small
 // educational dataset outgrows the bound rather than animate a truncated sample.
 const MAX_STAGE_DOCUMENTS = 2000;
 
-export default async function getArchiveData(): Promise<ArchiveData> {
+export default async function getArchiveData(queryId: string = DEFAULT_QUERY_ID): Promise<ArchiveData> {
+    const preset = getQueryPreset(queryId);
     const games = await getCollection<SteamGame>(GAMES_COLLECTION);
-    const stageNames = ["collection", "match", "unwind", "group", "sort", "limit"] as const;
+    const stageNames = STAGE_NAMES.slice(0, preset.pipeline.length + 1);
 
     // Each facet executes a successive prefix against the same collection input.
     // MongoDB computes membership, genre copies, counts, sorting, and the limit.
-    const [stages] = await games.aggregate<ArchiveStages>([
+    const [outputs] = await games.aggregate<Partial<ArchiveStages>>([
         { $facet: Object.fromEntries(stageNames.map((name, index) => [name, [
-            ...GUIDED_PIPELINE.slice(0, index),
+            ...preset.pipeline.slice(0, index),
             { $limit: MAX_STAGE_DOCUMENTS + 1 },
         ]])) },
     ], { maxTimeMS: 5000 }).toArray();
 
+    const stages: ArchiveStages = {
+        collection: [], match: [], unwind: [], group: [], sort: [], limit: [], ...outputs,
+    };
     for (const name of stageNames) {
         if (stages[name].length > MAX_STAGE_DOCUMENTS) {
             throw new Error(`Guided demo stage ${name} exceeds ${MAX_STAGE_DOCUMENTS} documents; complete stage results are required.`);
@@ -28,8 +32,11 @@ export default async function getArchiveData(): Promise<ArchiveData> {
     // Alphabetical placement before sort is a presentation choice: $group itself
     // does not promise an order. Keep every group, including those outside top 5.
     const groups = [...stages.group].sort((a, b) => a._id.localeCompare(b._id));
-    const genres = groups.map((group) => group._id);
-    const counts = groups.map((group) => group.count);
+    const genres = preset.rankField === null
+        ? [...new Set(stages.unwind.map((game) => game.genres))].sort()
+        : groups.map((group) => group._id);
+    // Short examples need genre colours, but do not invent group-stage results.
+    const counts = genres.map((genre) => groups.find((group) => group._id === genre)?.count ?? 0);
     const matchedIds = new Set(stages.match.map((game) => game._id));
     const copiesById = new Map<number, typeof stages.unwind>();
     for (const output of stages.unwind) {
@@ -57,7 +64,7 @@ export default async function getArchiveData(): Promise<ArchiveData> {
     });
 
     return {
-        stages, genres, counts, cards,
+        queryId: preset.id, stages, genres, counts, cards,
         total: stages.collection.length,
         matched: stages.match.length,
         unwound: stages.unwind.length,

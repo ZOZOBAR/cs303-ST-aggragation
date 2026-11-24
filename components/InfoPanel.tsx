@@ -1,6 +1,9 @@
+"use client";
+
+import { useState } from "react";
 import CodeBlock from "@/components/CodeBlock";
 import { ArchiveData, GameSummary } from "@/lib/types";
-import { PIPELINE_CODE, STAGES } from "@/lib/pipeline";
+import { getPipelineCode, getQueryPreset, getStages, STAGE_NAMES } from "@/lib/pipeline";
 
 type InfoPanelProps = {
     data: ArchiveData;
@@ -19,6 +22,10 @@ type InfoPanelProps = {
 export default function InfoPanel(props: InfoPanelProps) {
     const { data, stage, selected, rank, topGames, loading, selectedCard, onNext, onBack, onCloseCard } = props;
 
+    const [inspectionTab, setInspectionTab] = useState<"pipeline" | "json">("pipeline");
+    const stages = getStages(data.queryId);
+    const pipelineCode = getPipelineCode(data.queryId);
+    const preset = getQueryPreset(data.queryId);
     const groupOutputs = stage === 3 ? data.stages.group
         : stage === 4 ? data.stages.sort : stage === 5 ? data.stages.limit : [];
     const groupIndex = selected >= 0 ? selected : data.cards[selectedCard]?.genre ?? -1;
@@ -66,7 +73,7 @@ export default function InfoPanel(props: InfoPanelProps) {
 
                     {document && (
                         <>
-                            <p className="info-meta">{STAGES[stage].op} output document</p>
+                            <p className="info-meta">{stages[stage].op} output document</p>
                             <CodeBlock lines={documentLines} past={documentLines.map((_, i) => i)} />
                         </>
                     )}
@@ -83,6 +90,7 @@ export default function InfoPanel(props: InfoPanelProps) {
     // Drill-down view: a rack was clicked
     if (selected >= 0) {
         const genre = data.genres[selected];
+        const totalMinutes = data.stages.group.find((doc) => doc._id === genre)?.totalMinutes ?? 0;
         const documentLines = groupDocument ? JSON.stringify(groupDocument, null, 2).split("\n") : [];
 
         return (
@@ -94,8 +102,8 @@ export default function InfoPanel(props: InfoPanelProps) {
                         <span>_id</span>
                     </div>
                     <h2 className="info-title">{genre}</h2>
-                    <p className="info-sub">{data.counts[selected].toLocaleString("en-US")} documents</p>
-                    <p className="info-meta">rank #{rank + 1} by entry count · games by playtime · click a card to open it</p>
+                    <p className="info-sub">{data.counts[selected].toLocaleString("en-US")} documents · {totalMinutes.toLocaleString("en-US")} min total</p>
+                    <p className="info-meta">{stage >= 4 ? `rank #${rank + 1} by ${preset.rankField === "count" ? "entry count" : "total playtime"}` : "alphabetical order"} · rack length = entry count · click a card to open it</p>
 
                     {groupDocument ? (
                         <CodeBlock lines={documentLines} past={documentLines.map((_, i) => i)} />
@@ -124,10 +132,12 @@ export default function InfoPanel(props: InfoPanelProps) {
     }
 
     // Stage view
-    const info = STAGES[stage];
+    const info = stages[stage];
+    const output = data.stages[STAGE_NAMES[stage]];
+    const previewLines = JSON.stringify(output.slice(0, 20), null, 2).split("\n");
     const currentLine = info.code[info.code.length - 1];
-    const pastLines = [0, PIPELINE_CODE.length - 1, ...info.code];
-    const isLast = stage === STAGES.length - 1;
+    const pastLines = [0, pipelineCode.length - 1, ...info.code];
+    const isLast = stage === stages.length - 1;
 
     return (
         <section className="info-panel">
@@ -144,10 +154,21 @@ export default function InfoPanel(props: InfoPanelProps) {
                 <p className="info-meta">{info.meta(data)}</p>
                 <p className="info-text">{info.text}</p>
 
-                <CodeBlock lines={PIPELINE_CODE} current={currentLine} past={pastLines} />
+                <div className="inspection-tabs" role="tablist" aria-label="Stage inspection">
+                    <button id="pipeline-tab" role="tab" aria-selected={inspectionTab === "pipeline"} aria-controls="stage-inspection" onClick={() => setInspectionTab("pipeline")}>Pipeline</button>
+                    <button id="json-tab" role="tab" aria-selected={inspectionTab === "json"} aria-controls="stage-inspection" onClick={() => setInspectionTab("json")}>Stage JSON</button>
+                </div>
+                <div id="stage-inspection" role="tabpanel" aria-labelledby={inspectionTab === "pipeline" ? "pipeline-tab" : "json-tab"}>
+                    {inspectionTab === "pipeline" ? <CodeBlock lines={pipelineCode} current={currentLine} past={pastLines} /> : (
+                        <div className="stage-json">
+                            <p className="info-meta">{output.length.toLocaleString("en-US")} output documents · showing {Math.min(output.length, 20)}</p>
+                            <CodeBlock lines={previewLines} past={previewLines.map((_, i) => i)} />
+                        </div>
+                    )}
+                </div>
 
                 <button className="panel-action" onClick={onNext}>
-                    <span>{isLast ? "Replay pipeline" : `Next stage · ${STAGES[stage + 1].op}`}</span>
+                    <span>{isLast ? "Replay pipeline" : `Next stage · ${stages[stage + 1].op}`}</span>
                     <span className="arrow">↗</span>
                 </button>
             </div>

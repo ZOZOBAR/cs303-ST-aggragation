@@ -8,6 +8,7 @@ import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { BokehPass } from "three/examples/jsm/postprocessing/BokehPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
+import { getQueryPreset } from "@/lib/pipeline";
 import { ArchiveData, Theme } from "@/lib/types";
 
 type ArchiveSceneProps = {
@@ -126,6 +127,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         }
 
         const { genres, counts, cards } = data;
+        const preset = getQueryPreset(data.queryId);
         const random = makeRandom(11);
 
         /* ---------- renderer, scene, camera ---------- */
@@ -275,9 +277,14 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             };
         });
 
+        const minutesByGenre = new Map(data.stages.group.map((group) => [group._id, group.totalMinutes]));
+
         function redrawLabel(rack: (typeof racks)[number], showRank: boolean) {
             const count = counts[rack.genre].toLocaleString("en-US");
-            const top = showRank ? `#${rack.rank + 1} · ${count}` : count;
+            const minutes = (minutesByGenre.get(rack.name) ?? 0).toLocaleString("en-US");
+            const top = !showRank ? `${count} games`
+                : preset.rankField === "count" ? `#${rack.rank + 1} · ${count} games · ${minutes} min`
+                : `#${rack.rank + 1} · ${minutes} min · ${count} games`;
             const keyText = `${top}|${rack.name}`;
             if (keyText === rack.labelKey) {
                 return;
@@ -291,7 +298,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         document.fonts?.ready.then(() => racks.forEach((rack) => (rack.labelKey = "")));
 
         const alphabetical = genres.map((_, g) => g).sort((a, b) => genres[a].localeCompare(genres[b]));
-        const byCount = data.stages.sort.map((group) => genres.indexOf(group._id));
+        const sortedGenres = data.stages.sort.map((group) => genres.indexOf(group._id));
         const finalGenres = new Set(data.stages.limit.map((group) => group._id));
 
         function shelve(orderList: number[]) {
@@ -311,8 +318,27 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
         let lastFramedStage = -1;
 
         function updateFrameGoal(s: number) {
-            const width = s >= 3 ? racksWidth : floorWidth;
-            const depth = s >= 3 ? racksDepth : floorDepth;
+            let width = s >= 3 ? racksWidth : floorWidth;
+            let depth = s >= 3 ? racksDepth : floorDepth;
+            let centreX = 0;
+            let centreY = 0;
+            let centreZ = s >= 3 ? 0.2 : 0;
+            // The short unwind example focuses the surviving document and its copies.
+            if (preset.rankField === null && s >= 1) {
+                const survivors = cards.filter((card) => card.pass);
+                const spots = survivors.map((card) => docSpot[card.doc]);
+                if (spots.length > 0) {
+                    const xs = spots.map((spot) => spot.x);
+                    const zs = spots.map((spot) => spot.z);
+                    const fanWidth = s >= 2 ? Math.max(...survivors.map((card) => card.copies)) * FAN : 0;
+                    width = Math.max(...xs) - Math.min(...xs) + fanWidth + 2;
+                    depth = Math.max(...zs) - Math.min(...zs) + 2;
+                    centreX = (Math.max(...xs) + Math.min(...xs)) / 2;
+                    // Aim at the cards' centre, rather than their feet on the floor.
+                    centreY = CARD_H * Math.max(...spots.map((spot) => spot.sy)) / 2;
+                    centreZ = (Math.max(...zs) + Math.min(...zs)) / 2;
+                }
+            }
             const radius = 0.5 * Math.hypot(width, depth, CARD_H * 2);
 
             // Fit the radius into the free part of the screen (left of the info panel on wide screens)
@@ -322,7 +348,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             // The floor is flat, so its bounding sphere is too big: come closer so it fills the frame
             frameDistance = (radius / Math.sin(Math.min(halfV, halfH))) * (s >= 3 ? 0.8 : FLOOR_FIT);
             frameRadius = radius;
-            frameTarget.set(0, 0, s >= 3 ? 0.2 : 0);
+            frameTarget.set(centreX, centreY, centreZ);
 
             // Shadows and fog follow the size of the scene
             const extent = Math.max(width, depth) * 0.75 + 2;
@@ -525,7 +551,7 @@ export default function ArchiveScene({ data, stage, selected, selectedCard, them
             fog.far = viewDistance * 2;
 
             // Racks: order, visibility, pulled out, hover lift, dimmed
-            shelve(s >= 4 ? byCount : alphabetical);
+            shelve(s >= 4 ? sortedGenres : alphabetical);
             racks.forEach((rack) => {
                 const targetVisible = s >= 3 ? 1 : 0;
                 const targetPull = rack.genre === sel ? 1 : 0;

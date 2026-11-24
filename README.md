@@ -10,10 +10,34 @@ The data layer reads a real Steam library from **`steam-analytics.games`** in Mo
 | `$match` | Keep entries with `playtimeMinutes > 0`; failing cards sink into the floor |
 | `$unwind` | Emit one document per genre; stacked copies fan out on screen, while empty genre arrays disappear |
 | `$group` | Emit one aggregate document per genre; rack length represents played-entry count |
-| `$sort` | Rank by count descending, then genre name ascending |
+| `$sort` | Rank by totalMinutes descending, then genre name ascending; rack length remains entry count |
 | `$limit` | Keep the actual final 5 groups; all 16 genre racks are shown before this stage |
 | click a rack | Return up to 8 played entries in that genre, ordered by playtime descending, then AppID ascending |
 | click a card | Show the actual document JSON: genres array before unwind, one genre string after unwind |
+
+## Query presets
+
+Choose an example in the top selector, then click **Run example**. Selection alone does not replace the displayed results. On success, playback stops, card/rack selection clears, and the new example starts at the collection stage. A failed request keeps the previous results with an error message.
+
+| Preset | Filter | Ranking / stages |
+|---|---|---|
+| Genres by total playtime | `playtimeMinutes > 0` | `totalMinutes` descending; all six stages |
+| Genres by game count | `playtimeMinutes > 0` | `count` descending; all six stages |
+| Games played at least 10 hours | `playtimeMinutes >= 600` | `totalMinutes` descending; all six stages |
+| Terraria: match and unwind | `name: "Terraria"` | Collection → match → unwind only |
+
+The short Terraria example runs exactly:
+
+```js
+[
+  { $match: { name: "Terraria" } },
+  { $unwind: "$genres" }
+]
+```
+
+It shows 177 input documents, one matching game with a genres array, then four output documents with scalar genre strings. The camera focuses the surviving game after match so its split is easy to inspect. It does not execute hidden group, sort, or limit stages.
+
+The right panel offers **Pipeline** and **Stage JSON** tabs. JSON previews show at most 20 documents and separately state the complete stage count. Clicking a card or rack still opens its corresponding actual document.
 
 ## Setup
 
@@ -50,7 +74,7 @@ A working database connection is required. Missing configuration or failed queri
 | `type` | string or null | Store metadata; not a reliable filter for games versus software |
 | `metadataFound` | boolean | Whether Store metadata retrieval succeeded during import |
 
-Genre rankings count **played library entries**, not hours. A game can contribute to multiple genres, so genre counts and time totals overlap. Default `$unwind` drops empty genre arrays from its output without deleting stored documents.
+The default genre ranking uses **total playtime in minutes**; the count preset ranks by qualifying entries. Rack lengths still show **played library entry counts**; sort-stage labels show total minutes separately. A game can contribute to multiple genres, so genre counts and time totals overlap. Default `$unwind` drops empty genre arrays from its output without deleting stored documents.
 
 ## Project structure
 
@@ -67,8 +91,9 @@ components/
   StageControls.tsx     Stage number and stage switcher
   TopBar.tsx            Title, theme switch, play button
 lib/
-  pipeline.ts           Stage definitions and pipeline code (shared)
+  pipeline.ts           Fixed query registry, generated code, and stage descriptions
   getArchiveData.ts     Fixed pipeline prefixes, real stage outputs, and scene-card adaptation
+  runQuery.ts           Server Action: validate preset ID and run a read-only example
   getTopGames.ts        Server Action: most-played Steam entries in a genre
   getGame.ts            Server Action: one Steam game by numeric AppID
   types.ts              Shared TypeScript types
@@ -90,12 +115,12 @@ db.games.aggregate([
       totalMinutes: { $sum: "$playtimeMinutes" }
     }
   },
-  { $sort: { count: -1, _id: 1 } },
+  { $sort: { totalMinutes: -1, _id: 1 } },
   { $limit: 5 }
 ])
 ```
 
-The fixed `GUIDED_PIPELINE` in `lib/pipeline.ts` is the single definition used for both execution and the displayed code. The server executes every prefix in a MongoDB `$facet`, so all six branches read the same collection input:
+The `QUERY_PRESETS` registry in `lib/pipeline.ts` supplies both execution and displayed code. `GUIDED_PIPELINE` aliases the default preset. The server executes only the selected preset's prefixes in a MongoDB `$facet`, sharing the same input. Full genre examples have these six branches; Terraria has only the first three:
 
 | Stage result | Executed prefix |
 |---|---|
@@ -106,9 +131,9 @@ The fixed `GUIDED_PIPELINE` in `lib/pipeline.ts` is the single definition used f
 | `sort` | `[$match, $unwind, $group, $sort]` |
 | `limit` | `[$match, $unwind, $group, $sort, $limit]` |
 
-`ArchiveData.stages` contains the real output documents. Counts come from these arrays, card membership from the match output, genre copies from the unwind output, rack values from the group output, and rack ordering/final selection from the sort/limit outputs. JavaScript only adapts results to the existing animation geometry; it does not reimplement the query operators. Every genre group has a rack. Before `$sort`, alphabetical rack placement is a presentation choice because MongoDB does not guarantee `$group` output order.
+`ArchiveData.queryId` identifies the successfully executed preset. `ArchiveData.stages` contains its real output documents; arrays for stages absent from that preset stay empty and are not shown as executed stages. Counts come from these arrays, card membership from the match output, genre copies from the unwind output, rack values from the group output, and rack ordering/final selection from the sort/limit outputs. JavaScript only adapts results to the existing animation geometry; it does not reimplement the query operators. Every genre group has a rack. Before `$sort`, alphabetical rack placement is a presentation choice because MongoDB does not guarantee `$group` output order.
 
-Results are complete, without sampling. Each branch fetches at most 2,001 documents to detect overflow; if any stage exceeds the supported 2,000-document bound, the server reports an error instead of animating a truncated result. The MongoDB query has a 5-second execution timeout. This is a fixed teaching example, with no user-submitted query endpoint.
+Results are complete, without sampling. Each branch fetches at most 2,001 documents to detect overflow; if any stage exceeds the supported 2,000-document bound, the server reports an error instead of animating a truncated result. The MongoDB query has a 5-second execution timeout. The browser sends only an allowlisted preset ID to `runQuery()`, never a pipeline, database, or collection name. Unknown IDs are rejected before connecting. Execution failures return a generic message without connection details. These controls are a bounded read-only teaching feature, not an unrestricted query console.
 
 ### Shared data contract
 
@@ -118,8 +143,8 @@ Results are complete, without sampling. Each branch fetches at most 2,001 docume
 
 `ArchiveCard` is the scene's drawing model. Its string `id`, rack index, and copy positions are prepared from actual stage outputs for the existing animation. This conversion stays at the scene boundary; it does not change the database schema or game query results. The detail panel uses the numeric AppID to find the stage document, also matching the selected genre after unwind to distinguish copies.
 
-- The page uses ISR (`revalidate = 3600`), allowing cached pages to refresh at most once an hour.
-- `getTopGames()` returns numeric `_id`, game name, and playtime minutes as `GameSummary` records. It filters by selected genre and positive playtime, sorts by `playtimeMinutes: -1, _id: 1`, and limits to 8 entries.
+- The initial page uses ISR (`revalidate = 3600`). Clicking Run example executes the selected preset on the server again; subsequent stage clicks replay that returned snapshot without further database requests.
+- `getTopGames()` returns numeric `_id`, game name, and playtime minutes as `GameSummary` records. It filters by selected genre and the active preset's match condition, sorts by `playtimeMinutes: -1, _id: 1`, and limits to 8 entries.
 - Clicking a card reads `data.stages` directly, without another database request. Before unwind it displays the collection or match document; after unwind it displays that game–genre copy. At group, sort, and limit, selecting a rack or card shows that stage's aggregate document (`_id`, `count`, `totalMinutes`). Groups absent from the final limit output are reported as absent. The standalone `getGame()` action remains available for original-document lookups but is no longer called by the detail panel.
 - Database reads happen on the server. No runtime Steam API calls or database writes are performed.
 
@@ -127,7 +152,7 @@ Results are complete, without sampling. Each branch fetches at most 2,001 docume
 
 The existing layout, controls, themes, and animation transitions are preserved. Cards are stacked per input game before `$unwind`, then fan out into the copies MongoDB returned. A placeholder keeps a game visible until the stage where it disappears. All genre groups appear at `$group`; `$sort` and `$limit` use the actual returned order and final genre IDs. The scene uses the teammate's expanded palette, cycling only if genres outnumber available colours.
 
-Racks represent aggregate documents, while the cards inside illustrate their contributing games. MongoDB itself emits one document per genre at `$group`, not one per contributing card. Clicking a game card shows its real stage JSON. A separate viewer for every output document at each stage is deferred.
+Racks represent aggregate documents, while the cards inside illustrate their contributing games. MongoDB itself emits one document per genre at `$group`, not one per contributing card. Clicking a game card shows its real stage JSON. The Stage JSON tab previews up to 20 actual documents per stage, alongside the full output count.
 
 ## Verification
 
@@ -149,4 +174,15 @@ TypeScript (`npx tsc --noEmit --incremental false`), focused ESLint on changed f
 
 On 2026-11-19, the stepwise integration was checked against all six direct MongoDB prefixes: **177 → 101 → 302 → 16 → 16 → 5**. The displayed pipeline was compared with the executed definition. Card membership, per-rack counts, Terraria's four copies, sort order, and final groups passed. An in-memory change to the match predicate confirmed that drawing data follows query output. Empty input and overflow rejection for every stage were checked with a mocked collection.
 
-TypeScript, focused ESLint (including the scene), and whitespace checks passed again. All six stages were clicked in the browser, which reported no console errors; the existing dev page returned HTTP 200. The full intermediate-results inspector remains deferred; individual card JSON is available in the detail panel.
+TypeScript, focused ESLint (including the scene), and whitespace checks passed again. All six stages were clicked in the browser, which reported no console errors; the existing dev page returned HTTP 200. Individual card JSON remains available in the detail panel; the Stage JSON tab now adds bounded intermediate-output previews.
+
+On 2026-11-24, the preset queries and all executed prefixes were checked with read-only Atlas queries:
+
+| Preset | Stage output counts |
+|---|---|
+| Total playtime | 177 → 101 → 302 → 16 → 16 → 5 |
+| Game count | 177 → 101 → 302 → 16 → 16 → 5 |
+| At least 10 hours | 177 → 42 → 128 → 16 → 16 → 5 |
+| Terraria name match | 177 → 1 → 4 |
+
+Preset-specific drill-downs and rejection of unknown IDs were also checked. Browser checks covered changing presets, resetting from six stages to three and back, stage JSON, and Terraria's array-to-string split. No production build was run.

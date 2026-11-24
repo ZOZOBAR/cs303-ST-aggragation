@@ -13,7 +13,7 @@ export type SteamGame = {
 // Genre copies share "doc" and stay stacked until the unwind stage.
 export type ArchiveCard = {
     id: string;      // string AppID only for the scene; game query results keep numeric _id
-    genre: number;   // group rack index; -1 = dropped by match or unwind
+    genre: number;   // genre colour/rack index; -1 = dropped by match or unwind
     pass: boolean;   // AppID is present in MongoDB's match output
     doc: number;     // which sampled game this copy belongs to
     copy: number;    // position of this genre in the game's genres array
@@ -28,7 +28,7 @@ export type GenreGroup = {
 
 export type UnwoundGame = Omit<SteamGame, "genres"> & { genres: string };
 
-// Every array is the actual output of a fixed pipeline prefix in MongoDB.
+// Executed stages contain actual MongoDB output; stages absent from a preset stay empty.
 export type ArchiveStages = {
     collection: SteamGame[];
     match: SteamGame[];
@@ -38,7 +38,10 @@ export type ArchiveStages = {
     limit: GenreGroup[];
 };
 
+export type QueryId = "genre-time" | "genre-count" | "long-played" | "terraria-unwind";
+
 export type ArchiveData = {
+    queryId: QueryId;
     genres: string[];       // all group racks, alphabetically arranged before sort
     counts: number[];       // played-entry counts in the same order
     cards: ArchiveCard[];   // unwind output copies plus placeholders for dropped games
@@ -47,7 +50,7 @@ export type ArchiveData = {
     matched: number;
     unwound: number;        // rows in the actual unwind output
     groupCount: number;     // all groups before limit
-    topGenres: GenreGroup[]; // actual final $limit output, ranked by count
+    topGenres: GenreGroup[]; // actual final $limit output in the selected preset's order
     source: "mongodb";
 };
 

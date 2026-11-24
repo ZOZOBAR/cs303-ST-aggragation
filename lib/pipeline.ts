@@ -1,22 +1,64 @@
-import { ArchiveData } from "@/lib/types";
+import { ArchiveData, QueryId } from "@/lib/types";
 
 // Shared settings for the pipeline (used by the server queries and the UI)
 export const PLAYED_MATCH = { playtimeMinutes: { $gt: 0 } };
 export const LIMIT = 5;
 export const TOP_GAMES = 8;
 
-// Shared by the live aggregation and the displayed pipeline.
-export const GUIDED_PIPELINE = [
-    { $match: PLAYED_MATCH },
-    { $unwind: "$genres" },
-    { $group: {
-        _id: "$genres",
-        count: { $sum: 1 },
-        totalMinutes: { $sum: "$playtimeMinutes" },
-    } },
-    { $sort: { count: -1 as const, _id: 1 as const } },
-    { $limit: LIMIT },
+export const DEFAULT_QUERY_ID: QueryId = "genre-time";
+export const STAGE_NAMES = ["collection", "match", "unwind", "group", "sort", "limit"] as const;
+
+export type QueryPreset = {
+    id: QueryId;
+    label: string;
+    match: Record<string, unknown>;
+    matchLabel: string;
+    rankField: "count" | "totalMinutes" | null;
+    pipeline: Record<string, unknown>[];
+};
+
+const LONG_PLAYED_MATCH = { playtimeMinutes: { $gte: 600 } };
+const TERRARIA_MATCH = { name: "Terraria" };
+
+const groupStage = { $group: {
+    _id: "$genres",
+    count: { $sum: 1 },
+    totalMinutes: { $sum: "$playtimeMinutes" },
+} };
+
+function genrePipeline(match: Record<string, unknown>, rankField: "count" | "totalMinutes") {
+    return [
+        { $match: match },
+        { $unwind: "$genres" },
+        groupStage,
+        { $sort: { [rankField]: -1, _id: 1 } },
+        { $limit: LIMIT },
+    ];
+}
+
+// Only these fixed, read-only examples can be executed from the browser.
+export const QUERY_PRESETS: QueryPreset[] = [
+    { id: "genre-time", label: "Genres by total playtime", match: PLAYED_MATCH,
+        matchLabel: "playtimeMinutes > 0", rankField: "totalMinutes",
+        pipeline: genrePipeline(PLAYED_MATCH, "totalMinutes") },
+    { id: "genre-count", label: "Genres by game count", match: PLAYED_MATCH,
+        matchLabel: "playtimeMinutes > 0", rankField: "count",
+        pipeline: genrePipeline(PLAYED_MATCH, "count") },
+    { id: "long-played", label: "Games played at least 10 hours", match: LONG_PLAYED_MATCH,
+        matchLabel: "playtimeMinutes >= 600 (10 hours)", rankField: "totalMinutes",
+        pipeline: genrePipeline(LONG_PLAYED_MATCH, "totalMinutes") },
+    { id: "terraria-unwind", label: "Terraria: match and unwind", match: TERRARIA_MATCH,
+        matchLabel: 'name = "Terraria"', rankField: null,
+        pipeline: [{ $match: TERRARIA_MATCH }, { $unwind: "$genres" }] },
 ];
+
+export function getQueryPreset(id: string): QueryPreset {
+    const preset = QUERY_PRESETS.find((query) => query.id === id);
+    if (!preset) throw new Error("Unknown query preset");
+    return preset;
+}
+
+export const GUIDED_PIPELINE = getQueryPreset(DEFAULT_QUERY_ID).pipeline;
 
 // Each stage of the pipeline shown on the page
 export type Stage = {
@@ -28,13 +70,18 @@ export type Stage = {
     meta: (data: ArchiveData) => string;
 };
 
-export const PIPELINE_CODE = [
-    "db.games.aggregate([",
-    ...GUIDED_PIPELINE.map((stage, index) =>
-        `  ${JSON.stringify(stage)}${index < GUIDED_PIPELINE.length - 1 ? "," : ""}`
-    ),
-    "])",
-];
+export function getPipelineCode(queryId: string): string[] {
+    const { pipeline } = getQueryPreset(queryId);
+    return [
+        "db.games.aggregate([",
+        ...pipeline.map((stage, index) =>
+            `  ${JSON.stringify(stage)}${index < pipeline.length - 1 ? "," : ""}`
+        ),
+        "])",
+    ];
+}
+
+export const PIPELINE_CODE = getPipelineCode(DEFAULT_QUERY_ID);
 
 const format = (n: number) => n.toLocaleString("en-US");
 
@@ -74,10 +121,10 @@ export const STAGES: Stage[] = [
     {
         op: "$sort",
         title: "$sort",
-        sub: "Order by count, descending",
-        text: "The racks are re-shelved so the biggest group comes first.",
+        sub: "Order by total playtime, descending",
+        text: "The genre with the most total playtime comes first. Rack length still represents entry count; labels show total minutes separately.",
         code: [1, 2, 3, 4],
-        meta: () => "{ count: -1, _id: 1 }",
+        meta: () => JSON.stringify(GUIDED_PIPELINE[3].$sort),
     },
     {
         op: "$limit",
@@ -89,15 +136,19 @@ export const STAGES: Stage[] = [
     },
 ];
 
-// The query that runs when a rack is clicked
-export function drillDownCode(genre: string): string[] {
-    return [
-        `db.games.aggregate([`,
-        `  { $match: { genres: ${JSON.stringify(genre)},`,
-        `              playtimeMinutes: { $gt: 0 } } },`,
-        `  { $sort: { playtimeMinutes: -1, _id: 1 } },`,
-        `  { $limit: ${TOP_GAMES} },`,
-        `  { $project: { name: 1, playtimeMinutes: 1 } }`,
-        `])`,
-    ];
+// Presets use either the full genre pipeline or its match/unwind introduction.
+export function getStages(queryId: string): Stage[] {
+    const preset = getQueryPreset(queryId);
+    return STAGES.slice(0, preset.pipeline.length + 1).map((stage, index) => {
+        if (index === 1) return { ...stage, sub: `Filter: ${preset.matchLabel}` };
+        if (index === 4) return {
+            ...stage,
+            sub: preset.rankField === "count" ? "Order by entry count, descending" : "Order by total playtime, descending",
+            text: preset.rankField === "count"
+                ? "Genres with more qualifying library entries come first. Rack length represents entry count."
+                : "Genres with more total playtime come first. Rack length remains entry count; labels show minutes separately.",
+            meta: () => JSON.stringify(preset.pipeline[3].$sort),
+        };
+        return stage;
+    });
 }

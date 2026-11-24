@@ -6,18 +6,25 @@ import InfoPanel from "@/components/InfoPanel";
 import { StageCounter, StageScrubber } from "@/components/StageControls";
 import { Brand, TopBar } from "@/components/TopBar";
 import getTopGames from "@/lib/getTopGames";
-import { STAGES } from "@/lib/pipeline";
+import runQuery from "@/lib/runQuery";
+import { getStages } from "@/lib/pipeline";
 import { ArchiveData, Theme, GameSummary } from "@/lib/types";
 
-const LAST_STAGE = STAGES.length - 1;
 const PLAY_DELAY = 2800;
 
-function clampStage(value: number): number {
-    return Math.max(0, Math.min(LAST_STAGE, value));
+function clampStage(value: number, lastStage: number): number {
+    return Math.max(0, Math.min(lastStage, value));
 }
 
 // Holds the page state (stage, selected rack, theme) and connects the 3D scene with the UI
-export default function ArchiveApp({ data }: { data: ArchiveData }) {
+export default function ArchiveApp({ data: initialData }: { data: ArchiveData }) {
+    const [data, setData] = useState(initialData);
+    const [draftQueryId, setDraftQueryId] = useState<string>(initialData.queryId);
+    const [queryPending, setQueryPending] = useState(false);
+    const [queryError, setQueryError] = useState("");
+    const stages = getStages(data.queryId);
+    const lastStage = stages.length - 1;
+    const drillRequest = useRef(0);
     const [stage, setStage] = useState(0);
     const [selectedGenre, setSelectedGenre] = useState(-1);
     const [theme, setTheme] = useState<Theme>("day");
@@ -41,12 +48,15 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     const rank = order.indexOf(selected);
 
     function changeStage(next: number) {
+        if (queryPending) return;
         setPlaying(false);
-        setStage(clampStage(next));
+        setStage(clampStage(next, lastStage));
     }
 
     // Clicking a rack runs the drill-down Server Action for that genre
     function selectGenre(genre: number) {
+        if (queryPending) return;
+        const request = ++drillRequest.current;
         setSelectedGenre(genre);
         setSelectedCardIndex(-1);
         setPlaying(false);
@@ -56,24 +66,51 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         }
 
         setLoading(true);
-        getTopGames(data.genres[genre])
-            .then((games) => setTopGames(games))
-            .catch(() => setTopGames([]))
-            .finally(() => setLoading(false));
+        getTopGames(data.genres[genre], data.queryId)
+            .then((games) => { if (request === drillRequest.current) setTopGames(games); })
+            .catch(() => { if (request === drillRequest.current) setTopGames([]); })
+            .finally(() => { if (request === drillRequest.current) setLoading(false); });
     }
 
     // The panel reads the selected card's actual document from data.stages.
     function selectCard(index: number) {
+        if (queryPending) return;
         setSelectedCardIndex(index);
     }
 
+    async function executeQuery() {
+        if (queryPending) return;
+        setQueryPending(true);
+        setQueryError("");
+        setPlaying(false);
+        ++drillRequest.current;
+        setLoading(false);
+        try {
+            const result = await runQuery(draftQueryId);
+            if (result.error !== undefined) {
+                setQueryError(result.error);
+                return;
+            }
+            setData(result.data);
+            setStage(0);
+            setSelectedGenre(-1);
+            setSelectedCardIndex(-1);
+            setTopGames([]);
+        } catch {
+            setQueryError("Could not run this example. Previous results are still displayed. Please try again.");
+        } finally {
+            setQueryPending(false);
+        }
+    }
+
     function togglePlay() {
+        if (queryPending) return;
         if (playing) {
             setPlaying(false);
             return;
         }
         setSelectedGenre(-1);
-        if (stage === LAST_STAGE) {
+        if (stage === lastStage) {
             setStage(0);
         }
         setPlaying(true);
@@ -90,14 +127,14 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             return;
         }
         const timer = setInterval(() => {
-            if (stageRef.current >= LAST_STAGE) {
+            if (stageRef.current >= lastStage) {
                 setPlaying(false);
             } else {
-                setStage((prev) => clampStage(prev + 1));
+                setStage((prev) => clampStage(prev + 1, lastStage));
             }
         }, PLAY_DELAY);
         return () => clearInterval(timer);
-    }, [playing]);
+    }, [playing, lastStage]);
 
     const cardOpenRef = useRef(false);
     useEffect(() => {
@@ -107,13 +144,15 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
     // Keyboard: ← → to change stage, Esc to close the open card / rack
     useEffect(() => {
         function handleKey(event: KeyboardEvent) {
+            const target = event.target;
+            if (queryPending || (target instanceof HTMLElement && target.closest("select, input, textarea, [contenteditable='true']"))) return;
             if (event.key === "ArrowRight") {
                 setPlaying(false);
-                setStage((prev) => clampStage(prev + 1));
+                setStage((prev) => clampStage(prev + 1, lastStage));
             }
             if (event.key === "ArrowLeft") {
                 setPlaying(false);
-                setStage((prev) => clampStage(prev - 1));
+                setStage((prev) => clampStage(prev - 1, lastStage));
             }
             if (event.key === "Escape") {
                 // Close the open card first, then the open rack
@@ -126,13 +165,14 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
         }
         window.addEventListener("keydown", handleKey);
         return () => window.removeEventListener("keydown", handleKey);
-    }, []);
+    }, [lastStage, queryPending]);
 
     const source = "steam-analytics.games · live";
 
     return (
         <main className={theme === "night" ? "app night" : "app"}>
             <ArchiveScene
+                key={`scene-${data.queryId}`}
                 data={data}
                 stage={stage}
                 selected={selected}
@@ -144,9 +184,12 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
             <div className="veil" />
 
             <Brand />
-            <TopBar source={source} theme={theme} playing={playing} onTheme={setTheme} onPlay={togglePlay} />
+            <TopBar source={source} theme={theme} playing={playing} onTheme={setTheme} onPlay={togglePlay}
+                queryId={draftQueryId} onQueryChange={setDraftQueryId} onRunQuery={executeQuery}
+                queryPending={queryPending} queryError={queryError} queryDirty={draftQueryId !== data.queryId} />
 
             <InfoPanel
+                key={`panel-${data.queryId}`}
                 data={data}
                 stage={stage}
                 selected={selected}
@@ -154,13 +197,13 @@ export default function ArchiveApp({ data }: { data: ArchiveData }) {
                 topGames={topGames}
                 loading={loading}
                 selectedCard={selectedCard}
-                onNext={() => changeStage(stage === LAST_STAGE ? 0 : stage + 1)}
+                onNext={() => changeStage(stage === lastStage ? 0 : stage + 1)}
                 onBack={() => setSelectedGenre(-1)}
                 onCloseCard={() => setSelectedCardIndex(-1)}
             />
 
-            <StageCounter stage={stage} />
-            <StageScrubber stage={stage} onChange={changeStage} />
+            <StageCounter stage={stage} total={stages.length} />
+            <StageScrubber stage={stage} stages={stages} onChange={changeStage} disabled={queryPending} />
 
             <footer className="footer">
                 <div className="micro">{data.total} games · MongoDB stage results</div>
